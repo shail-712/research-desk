@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+
+# Environment variables (secrets). .env.example is committed.
+.env
+.streamlit/secrets.toml
+
+# Local caches: SEC ticker list, local SQLite store
+.cache/
+
+# Generated data
+data/raw/*
+data/processed/*
+
+# Old AWS-era index copy (stale vectors from a retired model). Safe to delete locally.
+aws_artifacts/
+
+# AWS SAM build output
+.aws-sam/

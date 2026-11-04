@@ -1,0 +1,28 @@
+{
+  "_about": "Eval set for Quick vs Deep (docs/SPEC.md §9). Drafted by the Builder on 2026-11-03 for the human to review. 'agents' = specialists the question should use (market / news / filings); 'companies' = tickers it is about.",
+  "questions": [
+    {"id": "s1", "type": "single", "q": "What is NVIDIA's stock price right now?", "companies": ["NVDA"], "agents": ["market"]},
+    {"id": "s2", "type": "single", "q": "What is AMD's market cap and P/E ratio?", "companies": ["AMD"], "agents": ["market"]},
+    {"id": "s3", "type": "single", "q": "How did Intel's stock move in the last session?", "companies": ["INTC"], "agents": ["market"]},
+    {"id": "s4", "type": "single", "q": "What are the latest headlines about NVIDIA?", "companies": ["NVDA"], "agents": ["news"]},
+    {"id": "s5", "type": "single", "q": "Any recent news on AMD?", "companies": ["AMD"], "agents": ["news"]},
+    {"id": "s6", "type": "single", "q": "What was NVIDIA's total revenue last quarter according to its filings?", "companies": ["NVDA"], "agents": ["filings"]},
+
+    {"id": "c1", "type": "comparison", "q": "Compare NVIDIA and AMD revenue", "companies": ["NVDA", "AMD"], "agents": ["filings"]},
+    {"id": "c2", "type": "comparison", "q": "Compare the day moves of NVIDIA, AMD and Intel", "companies": ["NVDA", "AMD", "INTC"], "agents": ["market"]},
+    {"id": "c3", "type": "comparison", "q": "Which has the higher P/E ratio, NVIDIA or AMD?", "companies": ["NVDA", "AMD"], "agents": ["market"]},
+    {"id": "c4", "type": "comparison", "q": "Compare NVIDIA's and AMD's data center segment revenue", "companies": ["NVDA", "AMD"], "agents": ["filings"]},
+    {"id": "c5", "type": "comparison", "q": "Compare NVIDIA and Intel stock price and latest news", "companies": ["NVDA", "INTC"], "agents": ["market", "news"]},
+    {"id": "c6", "type": "comparison", "q": "How do AMD and Intel describe competition in their filings?", "companies": ["AMD", "INTC"], "agents": ["filings"]},
+
+    {"id": "w1", "type": "why", "q": "Why did AMD stock fall in the last session?", "companies": ["AMD"], "agents": ["market", "news"]},
+    {"id": "w2", "type": "why", "q": "Why did Intel drop so much recently?", "companies": ["INTC"], "agents": ["market", "news"]},
+    {"id": "w3", "type": "why", "q": "What is driving NVIDIA's stock this week?", "companies": ["NVDA"], "agents": ["market", "news"]},
+    {"id": "w4", "type": "why", "q": "Is AMD's selloff related to its guidance?", "companies": ["AMD"], "agents": ["news", "filings"]},
+
+    {"id": "f1", "type": "filing", "q": "What revenue guidance did AMD give?", "companies": ["AMD"], "agents": ["filings"]},
+    {"id": "f2", "type": "filing", "q": "What risks does Intel highlight in its filings?", "companies": ["INTC"], "agents": ["filings"]},
+    {"id": "f3", "type": "filing", "q": "What are NVIDIA's main business segments and how did they perform?", "companies": ["NVDA"], "agents": ["filings"]},
+    {"id": "f4", "type": "filing", "q": "How much did AMD spend on research and development?", "companies": ["AMD"], "agents": ["filings"]}
+  ]
+}
