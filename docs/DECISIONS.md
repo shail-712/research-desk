@@ -52,8 +52,42 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
 
 ## D9. v1 baseline is re-run on the same day; corpus difference is disclosed
 - **Decision:** v1's eval is re-run on 2026-11-04 from a copy outside both repos (`docs/eval/v1-baseline.md`),
-  and v2 is compared against same-day runs, by question type.
+  using v1's config exactly as it is that day (`GEMINI_MODEL=gemini-3.8-flash`, v1's default fallbacks) plus
+  `SEC_USER_AGENT`; a model that returns 404 is replaced by the nearest available one and the exact models used
+  are recorded. v2 is compared against same-day runs, by question type.
 - **Why:** live prices/news change daily, Gemini model names changed, and v1's local knowledge base contained only
-  the three earnings press-release PDFs (1,491 chunks, no filing metadata), while v2 indexes 10-K/10-Q/8-K.
+  three older 10-Q PDFs in `data/raw/` (named `*_PressRelease.pdf` but actually AMD Q1 2025, INTC Q3 2025,
+  NVDA Q3 FY2026; 1,491 chunks, no 10-K, no filing metadata), while v2 indexes the latest 10-K/10-Q/8-K.
   Filing-question differences are partly the corpus, not only the code; the report says so.
 - **Trade-off:** one extra eval run of free-tier quota (~150 Gemini calls).
+
+## D10. `include_context` on `POST /ask`, for the eval runner only
+- **Options:** score the deployed stack without untraceable-number counts; always return the evidence text;
+  an opt-in flag.
+- **Decision:** `POST /ask` accepts `include_context` (default `false`). Only then does the worker keep the
+  evidence text on the job item (capped at 100 KB, `context_truncated` flag) and `GET /ask/{id}` return it.
+  Only `evals/run.py --target api` sets it.
+- **Why:** the frozen scorer (D8) needs the evidence text to count untraceable numbers; v1's worker dropped it,
+  so the deployed stack couldn't be scored on the headline metric.
+- **Trade-off:** larger job items for eval jobs (DynamoDB 400 KB item limit → the cap); one more input to validate.
+
+## D11. Embeddings are paid for once
+- **Options:** re-embed on every index rebuild/deploy; ship the index in the image; cache by content.
+- **Decision:** `core/embeddings.py` caches vectors keyed by `sha256(model|dim|task_type|text)` in
+  `data/cache/embeddings.sqlite`, with a snapshot on S3 (`scripts/bootstrap.py --push-cache/--pull-cache`).
+  Ingest skips chunks whose hash is already in the index. The index header records model + dim and refuses a
+  mismatch. The index lives only in S3 (create-only upload; bucket `DeletionPolicy`/`UpdateReplacePolicy: Retain`);
+  `data/` is excluded from the image, and no deploy step embeds.
+- **Why:** the Gemini embed free tier is ~1,000 requests/day and a full KB build can take most of it;
+  re-spending it on a rebuild or redeploy could block a demo day.
+- **Trade-off:** a cache to keep consistent with the model (handled by the key), and an S3 object that outlives
+  `sam delete` (deleted by hand when the project ends).
+
+## D12. Market holidays: known gap, safe default
+- **Options:** a holiday calendar (exchange_calendars / hard-coded list); ignore holidays; skip when there's no data.
+- **Decision:** no calendar. If the quote's trading date isn't today's New York date, the scan skips all price
+  rules for that run (logged), so a holiday never produces an alert from yesterday's numbers.
+- **Why:** a wrong alert is worse than none; a calendar is extra scope for a 5–7 day build.
+- **Trade-off:** on the day after a holiday the "why" session window may start at the wrong previous close
+  (e.g. Tuesday after a Monday holiday looks back to Monday 4 pm, missing weekend headlines). Listed as a
+  production improvement.
