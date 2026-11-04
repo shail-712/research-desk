@@ -37,3 +37,23 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
 ## D7. Async job API for `/ask`
 - **Why:** API Gateway's 30 s integration limit is below Deep mode's 20–75 s.
 - **Trade-off:** clients poll `GET /ask/{id}`; jobs stored in DynamoDB with a 1-day TTL.
+
+## D8. Eval scorer ported verbatim and frozen
+- **Options:** rewrite the eval metrics for v2; port v1's scoring unchanged.
+- **Decision:** `evals/scoring.py` (v1 `evals/run.py`: `score`, `summarise`, `pct`, `quantile`, `CITATION`,
+  `QUICK_TOOL_TO_AGENT`) and `core/numbers.py` (v1 `core/agents/checker.py` stage 1: `extract_numbers`,
+  `_supported`, `verify_numbers`, constants) are copied with identical function bodies from v1 commit `73b6fda`,
+  before any other module. A golden test re-scores v1's saved 2026-11-03 results and must reproduce v1's summary
+  exactly. Stage 1 is split out of `checker.py` so the scorer has no LLM/SDK dependency.
+- **Why:** v1 → v2 numbers (routing 75%/95%, cited lines 51%/90%, untraceable 1/109 and 0/98) are only comparable if the
+  ruler doesn't change.
+- **Trade-off:** inherits v1's quirks (derived numbers count as untraceable; sentence-split heuristic for
+  "lines"). Any change needs a new decision entry and a re-score of both v1 and v2 results.
+
+## D9. v1 baseline is re-run on the same day; corpus difference is disclosed
+- **Decision:** v1's eval is re-run on 2026-11-04 from a copy outside both repos (`docs/eval/v1-baseline.md`),
+  and v2 is compared against same-day runs, by question type.
+- **Why:** live prices/news change daily, Gemini model names changed, and v1's local knowledge base contained only
+  the three earnings press-release PDFs (1,491 chunks, no filing metadata), while v2 indexes 10-K/10-Q/8-K.
+  Filing-question differences are partly the corpus, not only the code; the report says so.
+- **Trade-off:** one extra eval run of free-tier quota (~150 Gemini calls).

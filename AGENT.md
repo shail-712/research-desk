@@ -27,7 +27,7 @@ Builder (one phase) ──► docs/PROGRESS.md ──► Reviewer (fresh session
 ## Shared context (paste at the top of every agent prompt)
 
 ```
-# PROJECT CONTEXT — Research Desk v2
+# PROJECT CONTEXT — Research Desk
 An AI investment research assistant for an AI Engineer assessment (brief in
 docs/ASSESSMENT.md, 5–7 days). This is a CLEAN REBUILD: docs/SPEC.md is the
 complete description of what to build, written from a first version that
