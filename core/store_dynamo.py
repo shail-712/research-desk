@@ -135,6 +135,8 @@ class DynamoStore:
             "dedupe_key": event["dedupe_key"], "notified": False, "created_at": created,
             "expires_at": _expires(FEED_TTL_DAYS),
         })
+        if event.get("fail_delivery"):  # demo replay of the DLQ path (aws_lambda/notify.py)
+            item["fail_delivery"] = True
         marker = {"pk": f"SEEN#{event['dedupe_key']}", "sk": "-", "feed_sk": sk,
                   "expires_at": _expires(SEEN_TTL_DAYS)}
         try:

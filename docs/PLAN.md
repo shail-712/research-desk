@@ -95,7 +95,7 @@ Bedrock is a recorded deviation (D1).
 | `core/market.py` | same | ADAPT | Finnhub fallback, `source`, QQQ/SPY, `trading_date`. |
 | `core/news.py`, `core/tickers.py`, `core/sec.py` | same | PORT | Match SPEC. |
 | `core/ingest.py` | helpers from `core/filings.py` (`html_to_text, document_text, relevant_section, chunk_words`) and `src/rag/build_embeddings.py` batching | REWRITE | SEC filing → sections → 300/50 chunks → cached embeddings → index. Skips already-indexed chunk hashes. **This is also the manual ingest CLI** (replaces auto-ingest, D13). |
-| `core/vectors.py` | same | ADAPT | Local + S3 (ETag `/tmp` cache, `If-Match` on upload). No pgvector. Header carries `model`, `dim` and per-row `chunk_hash`. Lambda only reads. |
+| `core/vectors.py` | same | ADAPT | Local + S3 (in-memory copy per container re-checked by ETag, `If-Match` on upload). No pgvector. Header carries `model`, `dim` and per-row `chunk_hash`. Lambda only reads. |
 | `core/retriever.py` | same | ADAPT | Drop pgvector. Keep balanced retrieval. |
 | `core/agent.py` | same | PORT | Quick mode. Already meets the scorer contract. |
 | `core/agents/{evidence,loop,specialists,supervisor,deep}.py` | same | PORT | Implement SPEC §6. Their tests pass. |
@@ -227,7 +227,7 @@ Work on branch `phase-<A|B|C|D>-<name>`, with one commit per task and `python -m
 |---|---|---|
 | C.1 | JSON logs with the request ID carried from API → worker → agents → tools. EMF metrics from SPEC §7 (via `runtime.emit_metrics`). Alarms: API 5xx, scan errors, Deep p90, DLQ (already done in B.7), all → SNS email. | CORE (logs + API 5xx alarm). Other alarms: STRETCH |
 | C.2 | `app.py` (ADAPT, API client: Quick/Deep toggle, polling, trace). 👤 Deploy to Streamlit Community Cloud with the secrets `DESK_API_URL` and `APP_ACCESS_CODE`. | STRETCH |
-| C.3 | `python -m evals.run --target api --url $URL` (sends `include_context: true`) → Deployed section. Measure cold start (`REPORT Init Duration`, 5 cold invokes) and the `/tmp` index cache hit rate. | CORE |
+| C.3 | `python -m evals.run --target api --url $URL` (sends `include_context: true`) → Deployed section. Measure cold start (`REPORT Init Duration`, 5 cold invokes) and the in-memory index copy hit rate. | CORE |
 
 **Acceptance:**
 - The Streamlit URL answers in both modes.
@@ -290,7 +290,7 @@ If we fall half a day or more behind, cut in this order:
 | Routing, cited lines, untraceable numbers vs v1 | `v2-results.md` vs `v1-baseline.md`, same frozen scorer | _tbd_ |
 | Alert latency (scan → Telegram) | `FEED.created_at` vs the notify log's `sent_at`, 5 replays, p50 | _tbd_ |
 | Cold start | `REPORT Init Duration`, 5 cold invokes per function | _tbd_ |
-| `/tmp` index cache hit rate | EMF `IndexCacheHit` / `IndexCacheMiss` over the deployed eval | _tbd_ |
+| In-memory index copy hit rate | EMF `IndexCacheHit` / `IndexCacheMiss` over the deployed eval | _tbd_ |
 | Embedding reuse | `cache_hits / (cache_hits + api_texts)` across rebuilds | _tbd_ |
 | Cost per month | Cost Explorer after ≥48 h | _tbd_ |
 | Gemini calls per question | scorer `calls` | _tbd_ |
