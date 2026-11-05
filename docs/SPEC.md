@@ -1,5 +1,7 @@
 # SPEC — Research Desk (v2, clean rebuild)
 
+> **Scope reduced 2026-11-05 — DECISIONS D13/D14 and PLAN rev 3 take precedence.**
+
 > The single description of what to build. Written 2026-11-04 from the first version
 > (`../investment-research-assistant`, read-only reference), which worked locally but grew through
 > five plan changes. v2 builds the **final** design directly. Brief: [`ASSESSMENT.md`](ASSESSMENT.md).

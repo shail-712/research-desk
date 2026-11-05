@@ -1,6 +1,6 @@
 # v1 baseline: saved 2026-11-03 run vs same-config rerun on 2026-11-05
 
-> **What this is.** It's the baseline v2 is measured against (PLAN task 1.2, DECISIONS D8/D9).
+> **What this is.** It's the baseline v2 is measured against (PLAN task A.2, DECISIONS D8/D9/D14).
 > - v1 (`investment-research-assistant` @ `73b6fda`) was re-run with `python -m evals.run --fresh` on **2026-11-05**. The run used a copy of v1 outside both repos, with v1's own `.venv` and v1's `.env` unchanged apart from adding `SEC_USER_AGENT`.
 > - It answered 20 questions from `evals/questions.json` in both modes, back to back.
 > - Both runs are scored by the frozen scorer, `evals/scoring.py`. It is a verbatim port of v1's scoring (D8).
