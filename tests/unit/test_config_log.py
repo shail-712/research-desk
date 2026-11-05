@@ -52,6 +52,22 @@ def test_request_id_follows_into_threads(captured):
     assert captured()[0]["request_id"] == "req-thread"
 
 
+def test_one_wrapper_serves_many_concurrent_threads():
+    """A thread pool reuses one wrapper for every task; concurrent calls must not collide."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    barrier = threading.Barrier(4)
+    log.new_request_id("req-pool")
+
+    def task(i):
+        barrier.wait(timeout=5)  # all four inside the wrapped call at the same time
+        return log.get_request_id()
+
+    wrapped = log.run_in_context(task)
+    with ThreadPoolExecutor(4) as pool:
+        assert list(pool.map(wrapped, range(4))) == ["req-pool"] * 4
+
+
 def test_log_tool_records_name_latency_success_tokens(captured):
     log.log_tool("get_quote", 0.4567, True, tokens=120, ticker="AMD")
     rec = captured()[0]

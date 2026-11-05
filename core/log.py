@@ -40,9 +40,11 @@ def get_request_id() -> str:
 
 
 def run_in_context(fn):
-    """Wraps `fn` so it runs with the caller's context (request ID) in a worker thread."""
+    """Wraps `fn` so it runs with the caller's context (request ID) in worker threads.
+    Each call gets its own copy: one Context can't be entered by two threads at once, and the
+    wrapper is shared by every task of a thread pool."""
     ctx = contextvars.copy_context()
-    return lambda *a, **k: ctx.run(fn, *a, **k)
+    return lambda *a, **k: ctx.copy().run(fn, *a, **k)
 
 
 def _secrets() -> list[str]:
