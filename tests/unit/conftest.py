@@ -18,17 +18,34 @@ for _name in ("FINNHUB_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SEC_
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Fresh local DB + caches per test."""
-    from core import config, tickers
+    from core import config, embeddings, tickers, vectors
 
     monkeypatch.setenv("LOCAL_DB_PATH", str(tmp_path / "local.db"))
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(tickers, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(tickers, "CACHE_FILE", tmp_path / "company_tickers.json")
+    # The real index and embedding cache in data/ must never be touched by tests.
+    monkeypatch.setattr(config, "INDEX_DIR", tmp_path / "index")
+    monkeypatch.setattr(config, "EMBED_CACHE_PATH", tmp_path / "cache" / "embeddings.sqlite")
     for name in ("STORE_BACKEND", "VECTOR_BACKEND", "VECTOR_BUCKET", "DDB_TABLE"):
         monkeypatch.delenv(name, raising=False)
     tickers.reset_cache()
+    embeddings.reset_service()
+    vectors.reset_vector_index()
     yield
     tickers.reset_cache()
+    embeddings.reset_service()
+    vectors.reset_vector_index()
+
+
+@pytest.fixture
+def aws_env(monkeypatch):
+    """Fake credentials + region so boto3 never touches a real account."""
+    for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
+                 "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "ap-south-1",
+                 "AWS_REGION": "ap-south-1"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
 
 
 SEC_ROWS = [
