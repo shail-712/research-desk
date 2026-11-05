@@ -57,7 +57,7 @@ flowchart LR
     API -->|"async invoke"| ASK["AskWorkerFunction<br/>Quick / Deep"]
     API <--> DDB[("DynamoDB single table<br/>provisioned 2/2, TTL, Streams")]
     ASK --> DDB
-    ASK --> S3[("S3: FAISS index + metadata<br/>/tmp warm cache, ETag check")]
+    ASK --> S3[("S3: FAISS index + metadata<br/>in-memory warm copy per container, ETag check")]
     EB["EventBridge Scheduler<br/>every 15 min, US market hours"] --> SCAN["ScanFunction<br/>prices, filings, indexing"]
     SCAN -->|"TransactWriteItems dedupe"| DDB
     SCAN -->|"append, If-Match"| S3
@@ -76,7 +76,7 @@ flowchart LR
 | Long answers | `POST /ask` → 202 + job id; worker Lambda; `GET /ask/{id}` | API Gateway's 30 s limit < Deep mode's 20–75 s |
 | Schedule | EventBridge Scheduler, cron every 15 min Mon–Fri 9:30–16:00 New York | on time, no servers |
 | Data | DynamoDB single table, **PROVISIONED 2/2** (always free; on-demand isn't), TTL, Streams | atomic dedupe via transactions |
-| Vectors | FAISS on S3 (~5–10 MB), `/tmp` cache re-checked by ETag; writes use S3 conditional writes (`If-Match`) and retry on conflict | no OpenSearch cost |
+| Vectors | FAISS on S3 (~5–10 MB), in-memory warm copy per Lambda container, re-checked by ETag; writes use S3 conditional writes (`If-Match`) and retry on conflict | no OpenSearch cost |
 | Secrets | SSM Parameter Store SecureString, read once per cold start | free; Secrets Manager isn't |
 | Images | **own `AWS::ECR::Repository`** in the template with a lifecycle policy keeping 2 images | SAM's auto-created repo can't take a lifecycle policy |
 | Observability | CloudWatch logs (14 d), EMF metrics, alarms → SNS email, 1 dashboard, X-Ray | free-tier |
@@ -244,4 +244,4 @@ docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, A
 Tech line: Python, AWS Lambda, API Gateway, DynamoDB, EventBridge, S3, SQS, CloudWatch, X-Ray, AWS SAM,
 Docker/ECR, Gemini, FAISS, GitHub Actions.
 To measure on the deployed stack: Deep/Quick p50 and p90, alert latency (scan → Telegram), cold start,
-`/tmp` index cache hit rate, cost/month after 48 h, eval scores.
+warm index cache hit rate, cost/month after 48 h, eval scores.

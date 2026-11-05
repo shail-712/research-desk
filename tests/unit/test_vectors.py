@@ -79,7 +79,7 @@ def s3(aws_env):
 
 def test_s3_upload_is_create_only_and_search_uses_the_warm_copy(s3, tmp_path):
     npz = V.IndexData(np.vstack([_unit(1), _unit(2)]), [_row("a"), _row("b")], MODEL, DIM).to_npz()
-    idx = V.S3Index("research-desk-test", client=s3, cache_dir=tmp_path)
+    idx = V.S3Index("research-desk-test", client=s3)
     etag = idx.upload(npz)
     with pytest.raises(V.VectorIndexError, match="already exists"):
         idx.upload(npz)
@@ -95,12 +95,12 @@ def test_s3_upload_is_create_only_and_search_uses_the_warm_copy(s3, tmp_path):
 def test_s3_refuses_to_upload_an_index_from_another_model(s3, tmp_path):
     npz = V.IndexData(np.vstack([_unit(1)]), [_row("a")], "other-model", DIM).to_npz()
     with pytest.raises(V.VectorIndexError, match="rebuild"):
-        V.S3Index("research-desk-test", client=s3, cache_dir=tmp_path).upload(npz)
+        V.S3Index("research-desk-test", client=s3).upload(npz)
 
 
 def test_s3_missing_object_is_a_friendly_error(s3, tmp_path):
     with pytest.raises(V.VectorIndexError, match="unavailable"):
-        V.S3Index("research-desk-test", client=s3, cache_dir=tmp_path).search(_unit(1))
+        V.S3Index("research-desk-test", client=s3).search(_unit(1))
 
 
 def test_backend_selection(monkeypatch):
@@ -110,3 +110,14 @@ def test_backend_selection(monkeypatch):
     monkeypatch.setenv("VECTOR_BUCKET", "")
     with pytest.raises(V.VectorIndexError, match="VECTOR_BUCKET"):
         V.get_vector_index()
+
+
+def test_s3_etag_recheck_failure_is_a_friendly_error(s3, monkeypatch):
+    """Review A NIT: head_object errors become VectorIndexError like get_object's."""
+    idx = V.S3Index("research-desk-test", client=s3)
+    idx.upload(V.IndexData(np.vstack([_unit(1)]), [_row("a")], MODEL, DIM).to_npz())
+    idx.search(_unit(1))
+    s3.delete_object(Bucket="research-desk-test", Key=idx.key)
+    monkeypatch.setattr(V, "REFRESH_SECONDS", -1)  # force the ETag re-check
+    with pytest.raises(V.VectorIndexError, match="unavailable"):
+        idx.search(_unit(1))

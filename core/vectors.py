@@ -11,7 +11,8 @@ dimension is refused (D11): mixed vector spaces silently break retrieval (a v1 g
 Every row carries `chunk_hash` (sha256 of the chunk text + its filing identity), so ingest can
 skip chunks that are already indexed and never pays to embed them again.
 
-S3: each Lambda container downloads the object once (cached in /tmp) and re-checks the ETag at
+S3: each Lambda container downloads the object once and keeps it in memory (the warm copy;
+not a /tmp file, which would live no longer than the container), and re-checks the ETag at
 most every REFRESH_SECONDS. The first upload is create-only (`If-None-Match: *`); replacing it
 needs the current ETag (`If-Match`), so two writers can't silently overwrite each other.
 
@@ -202,17 +203,16 @@ class LocalIndex:
 
 
 class S3Index:
-    """One .npz object on S3, cached in /tmp per Lambda container."""
+    """One .npz object on S3, kept in memory per Lambda container (warm start)."""
     name = "FAISS (S3)"
 
-    def __init__(self, bucket: str, key: str = "vectors/index.npz", client=None, cache_dir: Path = Path("/tmp")):
+    def __init__(self, bucket: str, key: str = "vectors/index.npz", client=None):
         import boto3
 
         if not bucket:
             raise VectorIndexError("VECTOR_BUCKET is not configured")
         self.bucket, self.key = bucket, key
         self.s3 = client or boto3.client("s3")
-        self.cache_file = Path(cache_dir) / "research-desk-index.npz"
         self._lock = threading.Lock()
         self._data: IndexData | None = None
         self._etag: str | None = None
@@ -221,11 +221,11 @@ class S3Index:
         self.cache_misses = 0
 
     def _download(self) -> None:
-        from botocore.exceptions import ClientError
+        from botocore.exceptions import BotoCoreError, ClientError
 
         try:
             obj = self.s3.get_object(Bucket=self.bucket, Key=self.key)
-        except ClientError as e:
+        except (ClientError, BotoCoreError) as e:
             raise VectorIndexError("Document index is unavailable") from e
         data = IndexData.from_npz(obj["Body"].read())
         data.check(*_expected())
@@ -240,7 +240,7 @@ class S3Index:
             if self._data is None:
                 self._download()
             elif time.monotonic() - self._checked > REFRESH_SECONDS:
-                head = self.s3.head_object(Bucket=self.bucket, Key=self.key)
+                head = self._head()
                 self._checked = time.monotonic()
                 if head["ETag"] != self._etag:
                     self._download()
@@ -249,6 +249,14 @@ class S3Index:
             else:
                 self.cache_hits += 1
             return self._data
+
+    def _head(self) -> dict:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        try:
+            return self.s3.head_object(Bucket=self.bucket, Key=self.key)
+        except (ClientError, BotoCoreError) as e:
+            raise VectorIndexError("Document index is unavailable") from e
 
     def search(self, vec, k=OVERFETCH_K, ticker=None):
         return self.load().search(vec, k, ticker)

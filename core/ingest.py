@@ -255,7 +255,8 @@ NOTE_PATTERNS = [
     ("Note: Concentration of Revenue and Customers", re.compile(
         r"^[ \t]*concentration\s+of\s+(?:revenue|credit\s+risk|customers?)[^\n]{0,60}$|"
         r"customers?\s+(?:that|which|who)\s+(?:each\s+)?(?:accounted|represented)\s+(?:for\s+)?(?:more\s+than\s+)?10\s*%|"
-        r"\b(?:direct|indirect)\s+customer\s+[A-Z]\b", re.I | re.M)),
+        # "Customer A": the letter stays case-sensitive under re.I ("customer a" in prose is not a match).
+        r"\b(?:direct|indirect)\s+customer\s+(?-i:[A-Z])\b", re.I | re.M)),
 ]
 MIN_SECTION_CHARS = 1500
 MAX_SECTION_CHARS = 300_000

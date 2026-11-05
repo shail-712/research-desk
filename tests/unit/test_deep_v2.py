@@ -364,3 +364,16 @@ def test_run_tool_passes_the_deadline_to_market_data():
         tools.run_tool("get_quote", {"ticker": "NVDA"}, EvidenceBoard(), "market", _time.monotonic() + 30)
         tools.run_tool("get_quote", {"ticker": "NVDA"}, EvidenceBoard(), "market")
     assert 25 < seen[0] <= 30 and seen[1] is None
+
+
+# ─── review A NITs ──────────────────────────────────────────────────────────
+
+def test_trace_names_follow_up_agents_that_used_tools_leaves_out(no_checker_llm):
+    plan = {"companies": ["NVDA", "AMD"], "tasks": [{"agent": "filings", "instruction": "a"}]}
+    with mock.patch.object(deep.supervisor, "plan", return_value=plan), \
+         mock.patch.object(deep, "run_specialist", side_effect=_report(gaps=["AMD missing"])), \
+         mock.patch.object(deep.supervisor, "follow_up", return_value=[{"agent": "news", "instruction": "b"}]), \
+         mock.patch.object(deep.supervisor, "write", return_value="A [E1]."):
+        result = deep.answer_deep("Compare NVIDIA and AMD revenue and stock moves")
+    assert result["used_tools"] == ["filings"]                     # unchanged for the frozen scorer
+    assert result["trace"]["follow_up_agents"] == ["news"] and "rounds[1]" in result["trace"]["note"]

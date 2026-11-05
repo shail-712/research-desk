@@ -329,3 +329,11 @@ def test_focus_is_applied_by_ingest(fake_sec, tmp_path, monkeypatch, no_sleep):
     idx = vectors.LocalIndex(tmp_path / "idx")
     ingest.ingest(["AMD", "NVDA"], index=idx, service=_service(tmp_path), sleep=no_sleep[1], focus=["NVDA"])
     assert {r["ticker"] for r in idx.load().meta} == {"NVDA"}
+
+
+def test_customer_letter_is_case_sensitive_under_re_i():
+    """Review A NIT: `[A-Z]` under re.I matched any letter ("direct customer a…")."""
+    pattern = dict(ingest.NOTE_PATTERNS)["Note: Concentration of Revenue and Customers"]
+    assert pattern.search("Direct Customer A represented 22% of revenue")
+    assert pattern.search("one indirect customer B, primarily")
+    assert not pattern.search("sold through a direct customer a few times")

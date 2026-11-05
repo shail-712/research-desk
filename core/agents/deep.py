@@ -102,7 +102,11 @@ def answer_deep(question: str) -> dict:
     started = time.monotonic()
     deadline = started + DEEP_BUDGET_SECONDS
     calls_before = llm.calls_made()
-    trace: dict = {"fast_path": False, "plan": None, "rounds": [], "checker": None, "fallback": None}
+    # `used_tools` (scored by the frozen eval, D8) lists round-1 agents only; agents added by the
+    # follow-up round appear in trace["rounds"][1] and trace["follow_up_agents"]. The UI trace
+    # should show both (review A NIT).
+    trace: dict = {"fast_path": False, "plan": None, "rounds": [], "follow_up_agents": [], "checker": None,
+                   "fallback": None, "note": "used_tools = round-1 agents; follow-up agents are in rounds[1]"}
 
     if not _take_daily_slot():
         return _quick(question, f"daily limit of {DEEP_MODE_DAILY_CAP} Deep questions reached", trace)
@@ -134,6 +138,7 @@ def answer_deep(question: str) -> dict:
         if extra:
             more = _dispatch(extra, board, deadline, plan["companies"])
             trace["rounds"].append(more)
+            trace["follow_up_agents"] = [r["agent"] for r in more]
             reports = reports + more  # new list: round 1 in the trace must stay as it was
 
     # ── write + fact-check ──
