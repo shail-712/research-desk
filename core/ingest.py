@@ -6,6 +6,9 @@ Knowledge-base ingest: SEC filing → sections → ~300-token chunks → cached 
 
 For each ticker it takes the **latest filed** 10-K, 10-Q and earnings 8-K (Item 2.02; the EX-99
 press release) from SEC's submissions feed (SPEC F4; "NVIDIA's Q3" = latest filed quarter).
+An 8-K's `reportDate` is the date of the event, not a fiscal period, so it is stored as
+`event_date`; the 8-K's `period` is the period of the 10-Q/10-K whose quarter it reports (the one
+that ended up to 90 days before the event), or empty when the feed has no such report.
 Only the sections research questions need are indexed:
   10-K  Item 1 Business (incl. competition, customers), Item 1A Risk Factors, Item 7 MD&A
   10-Q  Item 2 MD&A, Part II Item 1A Risk Factors
@@ -14,8 +17,10 @@ Only the sections research questions need are indexed:
 
 Embeddings are paid for once (D11): every chunk has a `chunk_hash` (accession + section + text);
 hashes already in the index are skipped, and the rest go through the embedding cache, so only
-text never embedded before costs API quota. API texts are capped per Pacific day
-(FILING_EMBED_DAILY_CAP, the Gemini quota day) and paced under 30k tokens/minute; the index is
+text never embedded before costs API quota. Metadata of indexed rows (period, labels) is rewritten
+in place when it changes, and once a newer filing of a (ticker, form) is fully indexed, the older
+filing's rows are dropped; neither costs an embedding call (vectors stay in the cache).
+API texts are capped per Pacific day (FILING_EMBED_DAILY_CAP, the Gemini quota day) and paced under 30k tokens/minute; the index is
 saved after every batch, so an interrupted build resumes where it stopped. This is also the
 manual ingest for new watchlist tickers or new filings (auto-ingest is cut, D13).
 
@@ -66,6 +71,7 @@ class Filing:
     period: str
     primary_doc: str
     items: str = ""
+    event_date: str = ""   # 8-K only: SEC reportDate, the date of the event (the earnings release)
 
     @property
     def folder(self) -> str:
@@ -77,7 +83,15 @@ class Filing:
 
     @property
     def label(self) -> str:
-        return f"{self.ticker} {self.form} (period {self.period}, filed {self.filed})"
+        return f"{self.ticker} {self.form} ({describe_period(self.form, self.period, self.event_date)}, filed {self.filed})"
+
+
+def describe_period(form: str, period: str, event_date: str = "") -> str:
+    """How a filing's date is shown in labels. An 8-K never presents its event date as a period."""
+    if form == "8-K":
+        text = f"event date {event_date}" if event_date else "earnings release"
+        return text + (f", reports the period ending {period}" if period else "")
+    return f"period {period}" if period else "period n/a"
 
 
 # ─── SEC feed ───────────────────────────────────────────────────────────────
@@ -86,11 +100,35 @@ def is_earnings_8k(form: str, items: str) -> bool:
     return form == "8-K" and "2.02" in (items or "")
 
 
+EARNINGS_PERIOD_MAX_DAYS = 90   # an earnings release follows its quarter's end by ~1-8 weeks
+
+
+def earnings_period(event_date: str, periods: list[str]) -> str:
+    """The fiscal period an earnings 8-K reports: the latest 10-Q/10-K period that ended before the
+    event, at most EARNINGS_PERIOD_MAX_DAYS earlier. "" if there is none (the release came before
+    that quarter's 10-Q is in the feed and the previous quarter is too old to be it)."""
+    try:
+        event = datetime.strptime(event_date, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    best = ""
+    for p in periods:
+        try:
+            days = (event - datetime.strptime(p, "%Y-%m-%d")).days
+        except ValueError:
+            continue
+        if 0 < days <= EARNINGS_PERIOD_MAX_DAYS and p > best:
+            best = p
+    return best
+
+
 def latest_filings(ticker: str, cik: int, company: str) -> list[Filing]:
     """The latest filed 10-K, 10-Q and earnings 8-K (any that exist), from SEC submissions."""
     recent = sec.get(SUBMISSIONS_URL.format(cik=int(cik))).json().get("filings", {}).get("recent", {})
     picked: dict[str, Filing] = {}
     forms, items = recent.get("form", []), recent.get("items") or []
+    report_dates = recent.get("reportDate") or [""] * len(forms)
+    periodic = [report_dates[i] for i, f in enumerate(forms) if f in ("10-K", "10-Q") and i < len(report_dates)]
     for i, form in enumerate(forms):  # newest first
         item = items[i] if i < len(items) else ""
         if form in ("10-K", "10-Q"):
@@ -101,10 +139,13 @@ def latest_filings(ticker: str, cik: int, company: str) -> list[Filing]:
             continue
         if kind in picked:
             continue
+        filed = recent["filingDate"][i]
+        report = (report_dates[i] if i < len(report_dates) else "") or filed
+        event_date = report if kind == "8-K" else ""
+        period = earnings_period(event_date, periodic) if kind == "8-K" else report
         picked[kind] = Filing(ticker=ticker, company=company, cik=int(cik), form=form,
-                              accession=recent["accessionNumber"][i], filed=recent["filingDate"][i],
-                              period=(recent.get("reportDate") or [""] * len(forms))[i] or recent["filingDate"][i],
-                              primary_doc=recent["primaryDocument"][i], items=item or "")
+                              accession=recent["accessionNumber"][i], filed=filed, period=period,
+                              primary_doc=recent["primaryDocument"][i], items=item or "", event_date=event_date)
         if len(picked) == 3:
             break
     return [picked[k] for k in ("10-K", "10-Q", "8-K") if k in picked]
@@ -313,9 +354,33 @@ def filing_rows(f: Filing, text: str) -> tuple[list[dict], dict[str, int]]:
         for c in chunks:
             rows.append({"chunk_hash": chunk_hash(f, section, c), "ticker": f.ticker, "company": f.company,
                          "form": f.form, "accession": f.accession, "filed": f.filed, "period": f.period,
-                         "url": f.url, "section": section,
-                         "source": f"{f.ticker} {f.form} (period {f.period}) — {section}", "text": c})
+                         "event_date": f.event_date, "url": f.url, "section": section,
+                         "source": f"{f.ticker} {f.form} ({describe_period(f.form, f.period, f.event_date)}) — {section}",
+                         "text": c})
     return rows, counts
+
+
+# Row fields that can change while the chunk doesn't (chunk_hash leaves them out).
+META_FIELDS = ("company", "filed", "period", "event_date", "url", "source")
+
+
+def metadata_updates(rows: list[dict], indexed: dict[str, dict]) -> dict[str, dict]:
+    """{chunk_hash: fields} for rows already indexed whose metadata differs from `rows`."""
+    out = {}
+    for r in rows:
+        old = indexed.get(r["chunk_hash"])
+        if old is not None and any((old.get(k) or "") != (r.get(k) or "") for k in META_FIELDS):
+            out[r["chunk_hash"]] = {k: r.get(k) for k in META_FIELDS}
+    return out
+
+
+def stale_hashes(indexed: dict[str, dict], latest: dict[tuple[str, str], tuple[str, set[str]]]) -> set[str]:
+    """Rows of an older filing of a (ticker, form), once the latest filing's rows are ALL indexed.
+    `latest` = {(ticker, form): (latest accession, its chunk hashes)}. While the new filing is
+    incomplete (the daily cap stopped the run) the old one stays, so retrieval is never left with neither."""
+    complete = {key: acc for key, (acc, hashes) in latest.items() if hashes and hashes <= indexed.keys()}
+    return {h for h, m in indexed.items()
+            if (m.get("ticker"), m.get("form")) in complete and m.get("accession") != complete[(m.get("ticker"), m.get("form"))]}
 
 
 # ─── Embedding budget ───────────────────────────────────────────────────────
@@ -379,13 +444,19 @@ def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, 
     """Indexes the latest filings of each ticker. Returns stats (also printed by the CLI)."""
     index = index or vectors.LocalIndex(config.INDEX_DIR)
     service = service or embeddings.get_service()
-    known = index.existing_hashes()
+    indexed = index.rows_by_hash()
+    known = set(indexed)
     stats = {"filings": [], "chunks": 0, "new_chunks": 0, "need_api": 0, "api_texts": 0, "cache_hits": 0,
-             "indexed": 0, "stopped": None, "used_today": used_today(), "daily_cap": FILING_EMBED_DAILY_CAP}
+             "indexed": 0, "relabelled": 0, "dropped": 0, "stopped": None, "used_today": used_today(),
+             "daily_cap": FILING_EMBED_DAILY_CAP}
     todo: list[dict] = []
+    updates: dict[str, dict] = {}
+    latest: dict[tuple[str, str], tuple[str, set[str]]] = {}
     for company in resolve_tickers(symbols):
         for f in latest_filings(company.ticker, company.cik, company.name):
             rows, counts = filing_rows(f, document_text(f))
+            updates.update(metadata_updates(rows, indexed))
+            latest[(f.ticker, f.form)] = (f.accession, {r["chunk_hash"] for r in rows})
             new = [r for r in rows if r["chunk_hash"] not in known]
             need = sum(not c for c in service.cached([r["text"] for r in new])) if new else 0
             stats["filings"].append({**asdict(f), "url": f.url, "sections": counts, "chunks": len(rows),
@@ -394,9 +465,25 @@ def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, 
             stats["new_chunks"] += len(new)
             stats["need_api"] += need
             todo += new
-    if dry_run or not todo:
+    stats["relabelled"] = len(updates)
+    stats["dropped"] = len(stale_hashes(indexed, latest))
+    if dry_run:
         return stats
+    if updates:  # metadata only: chunk text and vectors are unchanged, so no embedding calls
+        index.rewrite(updates=updates)
+        logger.info("Rewrote the metadata of %d indexed rows", len(updates))
+    if todo:
+        _embed(todo, stats, index, service, sleep, focus)
+    stale = stale_hashes(index.rows_by_hash(), latest)
+    stats["dropped"] = index.rewrite(drop=stale)[1] if stale else 0
+    if stale:
+        logger.info("Dropped %d rows of superseded filings", stats["dropped"])
+    stats["used_today"] = used_today()
+    return stats
 
+
+def _embed(todo: list[dict], stats: dict, index, service, sleep, focus) -> None:
+    """Embeds and indexes new rows in priority order within the daily cap; updates `stats`."""
     todo.sort(key=lambda r: order_key(r, focus))  # stable: keeps ticker and chunk order within a rank
 
     first = True
@@ -433,20 +520,22 @@ def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, 
         stats["indexed"] += index.add(batch, vecs)
         logger.info("Indexed batch: %d chunks (api_texts=%d, total indexed %d)", len(batch), api, stats["indexed"],
                     extra={"api_texts": api, "chunks": len(batch)})
-    stats["used_today"] = used_today()
-    return stats
 
 
 def print_report(stats: dict, dry_run: bool, out=None) -> None:
     w = (out or sys.stdout).write
     for f in stats["filings"]:
-        w(f"{f['ticker']} {f['form']}  accession {f['accession']}  period {f['period']}  filed {f['filed']}\n")
+        w(f"{f['ticker']} {f['form']}  accession {f['accession']}  "
+          f"{describe_period(f['form'], f['period'], f.get('event_date', ''))}  filed {f['filed']}\n")
         w(f"    {f['url']}\n")
         for name, n in f["sections"].items():
             w(f"    - {name}: {n} chunks\n")
         w(f"    chunks {f['chunks']}, not yet indexed {f['new_chunks']}, need embedding (not cached) {f['need_api']}\n")
     w(f"\nTotal chunks {stats['chunks']}, not yet indexed {stats['new_chunks']}, need embedding {stats['need_api']}\n")
     w(f"Embedding quota used today: {stats['used_today']}/{stats['daily_cap']} (Pacific day)\n")
+    upd, drop = ("would update", "would drop") if dry_run else ("updated", "dropped")
+    w(f"Metadata {upd} on {stats['relabelled']} indexed rows; {drop} {stats['dropped']} rows of superseded "
+      "filings (no embedding calls)\n")
     if not dry_run:
         w(f"Indexed {stats['indexed']} chunks; api_texts={stats['api_texts']} cache_hits={stats['cache_hits']}\n")
         if stats["stopped"]:

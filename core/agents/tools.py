@@ -55,7 +55,8 @@ DECLARATIONS = {
     "latest_filing": types.FunctionDeclaration(
         name="latest_filing",
         description=("The company's latest filed 10-K, 10-Q and earnings 8-K at the SEC: form, fiscal period "
-                     "end, filing date and link. Use it to state which quarter/year the filings cover."),
+                     "end (8-K: event date), filing date and link. Use it to state which quarter/year the "
+                     "filings cover. It has no financial figures: use search_filings for those."),
         parameters=S(type=OBJECT, properties={"ticker": S(type=STRING)}, required=["ticker"])),
 }
 
@@ -136,8 +137,8 @@ def _search_filings(board: EvidenceBoard, agent: str, query: str, ticker: str | 
     out = []
     for c in chunks:
         label = f"{c.get('ticker') or c['company']}: {c.get('form') or c.get('source')}"
-        if c.get("period"):
-            label += f", period {c['period']}"
+        if c.get("period") or c.get("event_date"):
+            label += ", " + ingest.describe_period(c.get("form") or "", c.get("period") or "", c.get("event_date") or "")
         if c.get("doc_date"):
             label += f", filed {c['doc_date']}"
         if c.get("section"):
@@ -159,10 +160,16 @@ def _latest_filing(board: EvidenceBoard, agent: str, ticker: str) -> dict:
         return {"evidence": [], "note": "no 10-K, 10-Q or earnings 8-K found"}
     out = []
     for f in latest:
-        kind = "earnings release 8-K" if f.form == "8-K" else f.form
-        summary = (f"{company.ticker} latest {kind}: fiscal period ended {f.period}, filed {f.filed} "
-                   f"(accession {f.accession})")
-        ev = board.add(agent, "latest_filing", summary, f"SEC {f.form} {f.filed}", f.url, "document")
+        if f.form == "8-K":
+            # reportDate of an 8-K is the event date, never a fiscal period (review A, M1).
+            covers = (f"; its results are for the period ending {f.period} (per the matching 10-Q/10-K)"
+                      if f.period else "; the fiscal period is stated in the release itself")
+            summary = (f"{company.ticker} latest earnings release 8-K: event date {f.event_date or f.filed}, "
+                       f"filed {f.filed}{covers} (accession {f.accession})")
+        else:
+            summary = (f"{company.ticker} latest {f.form}: fiscal period ended {f.period}, filed {f.filed} "
+                       f"(accession {f.accession})")
+        ev = board.add(agent, "latest_filing", summary, f"SEC {company.ticker} {f.form} {f.filed}", f.url, "document")
         out.append({"id": ev.id, "text": summary})
     return {"evidence": out}
 

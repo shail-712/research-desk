@@ -20,7 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from core import llm, market, news, retriever, tickers
+from core import ingest, llm, market, news, retriever, tickers
 from core.log import run_in_context
 
 logger = logging.getLogger(__name__)
@@ -84,8 +84,8 @@ def format_article(company: tickers.Company, a: dict) -> str:
 
 def chunk_label(c: dict) -> str:
     parts = [c.get("ticker") or c.get("company"), c.get("form") or c.get("source") or "document"]
-    if c.get("period"):
-        parts.append(f"period {c['period']}")
+    if c.get("period") or c.get("event_date"):
+        parts.append(ingest.describe_period(c.get("form") or "", c.get("period") or "", c.get("event_date") or ""))
     if c.get("doc_date"):
         parts.append(f"filed {c['doc_date']}")
     if c.get("section"):

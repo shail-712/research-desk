@@ -90,8 +90,100 @@ def _service(tmp_path, fail_first=0):
 def test_latest_filings_picks_newest_10k_10q_and_earnings_8k(fake_sec):
     got = ingest.latest_filings("NVDA", 1045810, "NVIDIA")
     assert [(f.form, f.accession, f.period) for f in got] == [
-        ("10-K", "A-10K", "2026-01-25"), ("10-Q", "A-10Q-new", "2026-07-26"), ("8-K", "A-8K-earn", "2026-08-26")]
+        ("10-K", "A-10K", "2026-01-25"), ("10-Q", "A-10Q-new", "2026-07-26"), ("8-K", "A-8K-earn", "2026-07-26")]
     assert got[0].url == "https://www.sec.gov/Archives/edgar/data/1045810/A10K/k.htm"
+    # Review A, M1: the 8-K's reportDate is its event date; its period is the quarter it reports.
+    assert (got[2].event_date, got[0].event_date) == ("2026-08-26", "")
+
+
+def test_earnings_period_is_the_quarter_that_ended_before_the_release():
+    periods = ["2026-07-26", "2026-04-26", "2026-01-25"]
+    assert ingest.earnings_period("2026-08-26", periods) == "2026-07-26"
+    assert ingest.earnings_period("2026-02-25", periods) == "2026-01-25"
+    # Q3 released before its 10-Q is in the feed: Q2 (2026-07-26) is too old to be the one reported.
+    assert ingest.earnings_period("2026-11-19", periods) == ""
+    assert ingest.earnings_period("", periods) == ""
+
+
+def test_8k_labels_show_the_event_date_never_as_a_period(fake_sec):
+    f = ingest.latest_filings("NVDA", 1045810, "NVIDIA")[2]
+    rows, _ = ingest.filing_rows(f, "Revenue was $46.7 billion. " + FILLER)
+    assert f.label == "NVDA 8-K (event date 2026-08-26, reports the period ending 2026-07-26, filed 2026-08-26)"
+    assert rows[0]["source"].startswith("NVDA 8-K (event date 2026-08-26, reports the period ending 2026-07-26)")
+    assert (rows[0]["period"], rows[0]["event_date"]) == ("2026-07-26", "2026-08-26")
+    assert ingest.describe_period("8-K", "", "2026-11-03") == "event date 2026-11-03"
+    assert ingest.describe_period("10-Q", "2026-07-26") == "period 2026-07-26"
+
+
+def test_old_8k_rows_are_relabelled_in_place_with_no_embedding_calls(fake_sec, tmp_path, no_sleep):
+    idx = vectors.LocalIndex(tmp_path / "idx")
+    ingest.ingest(["NVDA"], index=idx, service=_service(tmp_path), sleep=no_sleep[1])
+    # Make the 8-K rows look like they did before the fix: event date stored as the period.
+    old = {h: {"period": "2026-08-26", "event_date": None, "source": "NVDA 8-K (period 2026-08-26) — x"}
+           for h, m in idx.rows_by_hash().items() if m["form"] == "8-K"}
+    idx.rewrite(updates=old)
+    before = vectors.LocalIndex(tmp_path / "idx").load()
+    svc = _service(tmp_path)
+    stats = ingest.ingest(["NVDA"], index=vectors.LocalIndex(tmp_path / "idx"), service=svc, sleep=no_sleep[1])
+    after = vectors.LocalIndex(tmp_path / "idx").load()
+    assert stats["relabelled"] == len(old) > 0 and svc.api_texts == 0 and stats["api_texts"] == 0
+    assert np.array_equal(before.vectors, after.vectors) and len(after) == len(before)
+    rows = [m for m in after.meta if m["form"] == "8-K"]
+    assert all(m["period"] == "2026-07-26" and m["event_date"] == "2026-08-26" for m in rows)
+    assert all("period 2026-08-26" not in m["source"] for m in rows)
+
+
+# ─── S7: superseded filings ─────────────────────────────────────────────────
+
+NEWER_10Q = f"""<html><body><p>Item 2. Management's Discussion and Analysis</p><p>Third quarter revenue was
+$57,006 million. {" ".join(f"q3word{i}" for i in range(400))}</p><p>Item 3. Quantitative and Qualitative Disclosures</p><p>x</p></body></html>"""
+
+
+@pytest.fixture
+def newer_quarter(monkeypatch, fake_sec):
+    """Switches the SEC feed to one with a newer 10-Q (A-10Q-q3)."""
+    old_get = ingest.sec.get
+
+    def switch():
+        recent = {k: list(v) for k, v in SUBMISSIONS["filings"]["recent"].items()}
+        for key, value in [("form", "10-Q"), ("items", ""), ("accessionNumber", "A-10Q-q3"),
+                           ("filingDate", "2026-11-19"), ("reportDate", "2026-10-26"), ("primaryDocument", "q3.htm")]:
+            recent[key].insert(0, value)
+
+        def get(url):
+            if "submissions" in url:
+                return SimpleNamespace(json=lambda: {"filings": {"recent": recent}})
+            if url.endswith("q3.htm"):
+                return SimpleNamespace(text=NEWER_10Q)
+            return old_get(url)
+
+        monkeypatch.setattr(ingest.sec, "get", get)
+    return switch
+
+
+def test_superseded_filing_rows_are_dropped_once_the_new_one_is_indexed(newer_quarter, tmp_path, no_sleep):
+    idx_dir = tmp_path / "idx"
+    ingest.ingest(["NVDA"], index=vectors.LocalIndex(idx_dir), service=_service(tmp_path), sleep=no_sleep[1])
+    old_10q = {h for h, m in vectors.LocalIndex(idx_dir).rows_by_hash().items() if m["accession"] == "A-10Q-new"}
+    newer_quarter()
+    stats = ingest.ingest(["NVDA"], index=vectors.LocalIndex(idx_dir), service=_service(tmp_path), sleep=no_sleep[1])
+    rows = vectors.LocalIndex(idx_dir).rows_by_hash()
+    assert stats["dropped"] == len(old_10q) > 0 and not old_10q & rows.keys()
+    assert {m["accession"] for m in rows.values() if m["form"] == "10-Q"} == {"A-10Q-q3"}
+    assert {m["accession"] for m in rows.values() if m["form"] != "10-Q"} == {"A-10K", "A-8K-earn"}  # untouched
+    assert stats["api_texts"] == stats["new_chunks"] > 0   # only the new quarter's text was embedded
+
+
+def test_old_filing_stays_until_the_new_one_is_complete(newer_quarter, tmp_path, monkeypatch, no_sleep):
+    idx_dir = tmp_path / "idx"
+    ingest.ingest(["NVDA"], index=vectors.LocalIndex(idx_dir), service=_service(tmp_path), sleep=no_sleep[1])
+    newer_quarter()
+    monkeypatch.setattr(ingest, "FILING_EMBED_DAILY_CAP", ingest.used_today() + 1)  # room for 1 new chunk only
+    monkeypatch.setattr(ingest, "EMBED_TOKENS_PER_BATCH", 300)
+    stats = ingest.ingest(["NVDA"], index=vectors.LocalIndex(idx_dir), service=_service(tmp_path), sleep=no_sleep[1])
+    accessions = {m["accession"] for m in vectors.LocalIndex(idx_dir).rows_by_hash().values()}
+    assert "daily embedding cap" in stats["stopped"] and stats["dropped"] == 0
+    assert {"A-10Q-new", "A-10Q-q3"} <= accessions
 
 
 def test_10k_sections_skip_the_table_of_contents_and_in_text_references():

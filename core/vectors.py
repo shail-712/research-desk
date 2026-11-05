@@ -50,7 +50,7 @@ def _candidate(m: dict, score: float) -> dict:
     return {"company": m.get("company") or m.get("ticker") or "UNKNOWN", "ticker": m.get("ticker"),
             "source": m.get("source", ""), "text": m.get("text", ""), "score": round(score, 4),
             "url": m.get("url"), "form": m.get("form"), "doc_date": m.get("filed"),
-            "section": m.get("section"), "period": m.get("period")}
+            "section": m.get("section"), "period": m.get("period"), "event_date": m.get("event_date")}
 
 
 class IndexData:
@@ -106,6 +106,14 @@ class IndexData:
         new_vecs = np.asarray(vectors, dtype="float32")[keep]
         return IndexData(np.vstack([self.vectors, new_vecs]), self.meta + [rows[i] for i in keep], self.model, self.dim)
 
+    def with_changes(self, updates: dict[str, dict] | None = None, drop: set[str] | None = None) -> "IndexData":
+        """A new IndexData with metadata fields merged into rows (by chunk_hash) and rows dropped.
+        Vectors are kept as they are: no re-embedding."""
+        updates, drop = updates or {}, drop or set()
+        keep = [i for i, m in enumerate(self.meta) if m.get("chunk_hash") not in drop]
+        meta = [{**self.meta[i], **updates.get(self.meta[i].get("chunk_hash"), {})} for i in keep]
+        return IndexData(self.vectors[keep], meta, self.model, self.dim)
+
     def to_npz(self) -> bytes:
         buf = io.BytesIO()
         enc = lambda obj: np.frombuffer(json.dumps(obj).encode("utf-8"), dtype=np.uint8)  # noqa: E731
@@ -160,19 +168,37 @@ class LocalIndex:
     def existing_hashes(self) -> set[str]:
         return set(self.load(create=True).hashes)
 
+    def rows_by_hash(self) -> dict[str, dict]:
+        return {m.get("chunk_hash"): m for m in self.load(create=True).meta}
+
+    def _save(self, new: IndexData) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_bytes(new.to_npz())
+        tmp.replace(self.path)
+        with self._lock:
+            self._data = new
+
     def add(self, rows: list[dict], vectors: np.ndarray) -> int:
         """Appends rows not indexed yet and saves. Returns how many were added."""
         data = self.load(create=True)
         new = data.with_rows(rows, vectors)
         added = len(new) - len(data)
         if added:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_bytes(new.to_npz())
-            tmp.replace(self.path)
-            with self._lock:
-                self._data = new
+            self._save(new)
         return added
+
+    def rewrite(self, updates: dict[str, dict] | None = None, drop: set[str] | None = None) -> tuple[int, int]:
+        """Merges metadata `updates` {chunk_hash: fields} into rows and removes the `drop` hashes,
+        then saves. Returns (rows updated, rows dropped). Vectors are untouched."""
+        data = self.load(create=True)
+        updated = sum(1 for m in data.meta if m.get("chunk_hash") in (updates or {})
+                      and m.get("chunk_hash") not in (drop or set()))
+        new = data.with_changes(updates, drop)
+        dropped = len(data) - len(new)
+        if updated or dropped:
+            self._save(new)
+        return updated, dropped
 
 
 class S3Index:

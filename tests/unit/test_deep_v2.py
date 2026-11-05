@@ -90,9 +90,10 @@ def test_latest_filing_lists_10k_10q_and_earnings_8k(monkeypatch):
     from core import ingest
 
     monkeypatch.setenv("SEC_USER_AGENT", "Test test@example.com")
-    filings = [ingest.Filing("NVDA", "NVIDIA", 1045810, form, f"acc-{form}", filed, period, "d.htm")
+    filings = [ingest.Filing("NVDA", "NVIDIA", 1045810, form, f"acc-{form}", filed, period, "d.htm",
+                             event_date="2026-08-26" if form == "8-K" else "")
                for form, filed, period in [("10-K", "2026-02-25", "2026-01-25"), ("10-Q", "2026-08-26", "2026-07-26"),
-                                           ("8-K", "2026-08-26", "2026-08-26")]]
+                                           ("8-K", "2026-08-26", "2026-07-26")]]
     b = EvidenceBoard()
     nvda = tools.tickers.Company("NVDA", "NVIDIA", 1045810)
     with mock.patch.object(tools.ingest, "latest_filings", return_value=filings), \
@@ -101,6 +102,39 @@ def test_latest_filing_lists_10k_10q_and_earnings_8k(monkeypatch):
     assert len(out["evidence"]) == 3
     assert b.get("E2").summary == "NVDA latest 10-Q: fiscal period ended 2026-07-26, filed 2026-08-26 (accession acc-10-Q)"
     assert "earnings release 8-K" in b.get("E3").summary
+
+
+def test_earnings_8k_never_renders_its_event_date_as_a_fiscal_period(monkeypatch):
+    """Review A, M1: an 8-K's SEC reportDate is the event date, not the quarter's end."""
+    from core import ingest
+
+    monkeypatch.setenv("SEC_USER_AGENT", "Test test@example.com")
+    nvda = tools.tickers.Company("NVDA", "NVIDIA", 1045810)
+    eight_k = [ingest.Filing("NVDA", "NVIDIA", 1045810, "8-K", "acc-8k", "2026-08-26", "2026-07-26", "e.htm",
+                             event_date="2026-08-26"),
+               ingest.Filing("AMD", "AMD", 2488, "8-K", "acc-amd", "2026-11-03", "", "e.htm", event_date="2026-11-03")]
+    expected = ["results are for the period ending 2026-07-26", "fiscal period is stated in the release"]
+    for f, covers in zip(eight_k, expected):
+        b = EvidenceBoard()
+        with mock.patch.object(tools.ingest, "latest_filings", return_value=[f]), \
+             mock.patch.object(tools.tickers, "lookup_ticker", return_value=nvda):
+            tools.run_tool("latest_filing", {"ticker": "NVDA"}, b, "filings")
+        summary = b.get("E1").summary
+        assert "fiscal period ended" not in summary and f"event date {f.event_date}" in summary
+        assert covers in summary
+        assert "period 2026-08-26" not in f.label and "period 2026-11-03" not in f.label
+    assert b.get("E1").label == "SEC NVDA 8-K 2026-11-03"   # NIT: the ticker is in the source label
+    # Quick [Doc N] labels and Deep search_filings labels of an 8-K chunk
+    chunk = {"ticker": "NVDA", "company": "NVIDIA", "form": "8-K", "period": "2026-07-26", "event_date": "2026-08-26",
+             "doc_date": "2026-08-26", "section": "Earnings press release (EX-99.1)", "text": "Revenue $46.7 billion"}
+    from core import agent as quick
+    assert quick.chunk_label(chunk) == ("NVDA | 8-K | event date 2026-08-26, reports the period ending 2026-07-26 | "
+                                        "filed 2026-08-26 | Earnings press release (EX-99.1)")
+    b = EvidenceBoard()
+    with mock.patch.object(tools.retriever, "search", return_value=[chunk]):
+        tools.run_tool("search_filings", {"query": "revenue"}, b, "filings")
+    assert "event date 2026-08-26, reports the period ending 2026-07-26" in b.get("E1").label
+    assert "period 2026-08-26" not in b.get("E1").label
 
 
 # ─── failure paths ──────────────────────────────────────────────────────────
