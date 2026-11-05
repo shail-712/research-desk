@@ -6,9 +6,10 @@ Command-line access to the tools.
     python cli.py news NVDA
     python cli.py resolve "advanced micro devices"
     python cli.py ingest NVDA AMD INTC [--dry-run]  # build / extend the knowledge base
+    python cli.py retriever "Compare NVIDIA and AMD data center revenue"
+    python cli.py agent "What is AMD's market cap and P/E ratio, and what are the latest headlines?"
 
-Adapted from v1 cli.py (73b6fda). `retriever` and `agent [--deep]` are added with their modules
-(PLAN A.11, A.12).
+Adapted from v1 cli.py (73b6fda).
 """
 
 import argparse
@@ -37,10 +38,17 @@ def main(argv=None) -> int:
     p = sub.add_parser("ingest")
     p.add_argument("tickers", nargs="+")
     p.add_argument("--dry-run", action="store_true", help="show filings, sections and embedding cost only")
+    p = sub.add_parser("retriever")
+    p.add_argument("query", nargs="?", default="Compare NVIDIA and AMD data center revenue")
+    p.add_argument("--top-k", type=int, default=5)
+    p = sub.add_parser("agent")
+    p.add_argument("query", nargs="?", default="What is NVIDIA's stock price and latest news?")
     args = parser.parse_args(argv)
     setup_logging(env("LOG_LEVEL", "WARNING"))  # JSON logs go to stderr; results to stdout
 
-    from core import market, news, tickers
+    from core import agent, log, market, news, retriever, tickers
+
+    log.new_request_id()
 
     try:
         if args.cmd == "quotes":
@@ -64,7 +72,15 @@ def main(argv=None) -> int:
             stats = ingest.ingest(args.tickers, dry_run=args.dry_run)
             ingest.print_report(stats, args.dry_run)
             return 1 if stats["stopped"] else 0
-    except (market.MarketDataError, news.NewsError, ValueError) as e:
+        elif args.cmd == "retriever":
+            chunks = retriever.search(args.query, args.top_k)
+            _print([{**c, "text": c["text"][:200] + "..."} for c in chunks])
+        elif args.cmd == "agent":
+            result = agent.answer(args.query)
+            result.pop("context", None)
+            _print(result)
+            return 0 if result["answer"] else 2
+    except (market.MarketDataError, news.NewsError, retriever.RetrieverError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0

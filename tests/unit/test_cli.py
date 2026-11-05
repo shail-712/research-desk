@@ -55,3 +55,22 @@ def test_ingest_dry_run_is_wired(monkeypatch, capsys):
 def test_bad_usage_exits_with_usage(argv):
     with pytest.raises(SystemExit):
         cli.main(argv)
+
+
+def test_agent_prints_the_answer_without_context(monkeypatch, capsys):
+    from core import agent
+
+    monkeypatch.setattr(agent, "answer", lambda q: {"answer": "ok [Doc 1]", "context": "big", "mode": "quick"})
+    assert cli.main(["agent", "q"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"answer": "ok [Doc 1]", "mode": "quick"}
+
+
+def test_retriever_error_is_a_one_line_error(monkeypatch, capsys):
+    from core import retriever
+
+    def down(*a, **k):
+        raise retriever.RetrieverError("Document index is unavailable")
+    monkeypatch.setattr(retriever, "search", down)
+    assert cli.main(["retriever", "x"]) == 1
+    assert capsys.readouterr().err.strip() == "Error: Document index is unavailable"
