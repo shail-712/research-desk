@@ -188,12 +188,14 @@ def declarations(names: list[str]) -> types.Tool:
     return types.Tool(function_declarations=[DECLARATIONS[n] for n in names])
 
 
-def run_tool(name: str, args: dict, board: EvidenceBoard, agent: str) -> dict:
-    """Executes one tool call. Never raises: errors become {"error": "..."} for the model."""
+def run_tool(name: str, args: dict, board: EvidenceBoard, agent: str, deadline: float | None = None) -> dict:
+    """Executes one tool call. Never raises: errors become {"error": "..."} for the model.
+    `deadline` (time.monotonic) lets slow providers skip optional calls (market.deadline)."""
     if name not in _IMPL:
         return {"error": f"Unknown tool {name}"}
     try:
-        return _IMPL[name](board, agent, dict(args or {}))
+        with market.deadline(deadline):
+            return _IMPL[name](board, agent, dict(args or {}))
     except (market.MarketDataError, news.NewsError, retriever.RetrieverError, sec.SecError) as e:
         return {"error": str(e)}
     except ValueError as e:

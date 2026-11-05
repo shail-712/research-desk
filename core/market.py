@@ -20,6 +20,8 @@ Adapted from v1 core/market.py (73b6fda): Finnhub fallback, `source`, `trading_d
 import logging
 import math
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -42,6 +44,35 @@ NEW_YORK = ZoneInfo("America/New_York")
 
 class MarketDataError(RuntimeError):
     """Market data could not be fetched. The message is safe to show."""
+
+
+# ─── Caller's deadline (review A, S3) ───────────────────────────────────────
+# Deep mode's tools run under a time budget. The deadline travels in a contextvar (set per tool
+# call by core.agents.tools.run_tool), so optional calls (Finnhub market cap / P/E) are skipped
+# when there isn't time for them. Without a deadline everything runs as before.
+
+_deadline: ContextVar[float | None] = ContextVar("market_deadline", default=None)
+OPTIONAL_CALL_MIN_SECONDS = FINNHUB_TIMEOUT + 2   # one Finnhub request plus a little slack
+
+
+@contextmanager
+def deadline(at: float | None):
+    """Within this block, seconds_left() counts down to `at` (time.monotonic())."""
+    token = _deadline.set(at)
+    try:
+        yield
+    finally:
+        _deadline.reset(token)
+
+
+def seconds_left() -> float | None:
+    at = _deadline.get()
+    return None if at is None else at - time.monotonic()
+
+
+def _time_for_optional_call() -> bool:
+    left = seconds_left()
+    return left is None or left >= OPTIONAL_CALL_MIN_SECONDS
 
 
 def _num(value):
@@ -151,16 +182,22 @@ def _finnhub_detail(symbol: str) -> dict:
     """Finnhub quote + market cap + P/E. Cap and P/E are optional (ETFs have neither)."""
     quote = _finnhub_quote(symbol)
     market_cap = pe_ratio = None
-    try:
-        cap_millions = _num(_finnhub_get("stock/profile2", symbol=symbol).get("marketCapitalization"))
-        market_cap = cap_millions * 1e6 if cap_millions else None
-    except MarketDataError as e:
-        logger.info("Finnhub market cap unavailable for %s: %s", symbol, e)
-    try:
-        metrics = _finnhub_get("stock/metric", symbol=symbol, metric="all").get("metric") or {}
-        pe_ratio = _num(metrics.get("peTTM")) or _num(metrics.get("peBasicExclExtraTTM"))
-    except MarketDataError as e:
-        logger.info("Finnhub P/E unavailable for %s: %s", symbol, e)
+    if _time_for_optional_call():
+        try:
+            cap_millions = _num(_finnhub_get("stock/profile2", symbol=symbol).get("marketCapitalization"))
+            market_cap = cap_millions * 1e6 if cap_millions else None
+        except MarketDataError as e:
+            logger.info("Finnhub market cap unavailable for %s: %s", symbol, e)
+    else:
+        logger.info("Finnhub market cap skipped for %s: little time left", symbol)
+    if _time_for_optional_call():
+        try:
+            metrics = _finnhub_get("stock/metric", symbol=symbol, metric="all").get("metric") or {}
+            pe_ratio = _num(metrics.get("peTTM")) or _num(metrics.get("peBasicExclExtraTTM"))
+        except MarketDataError as e:
+            logger.info("Finnhub P/E unavailable for %s: %s", symbol, e)
+    else:
+        logger.info("Finnhub P/E skipped for %s: little time left", symbol)
     return {**quote, "volume": None, "market_cap": market_cap, "pe_ratio": pe_ratio}
 
 
@@ -284,7 +321,10 @@ def get_quote(ticker: str) -> dict:
 
     prev = data["prev_close"]
     change_pct = round((data["price"] - prev) / prev * 100, 2) if prev else None
-    return {"ticker": symbol, **data, "pe_ratio": pe_ratio, "change_pct": change_pct,
+    # Same precision as get_quotes() and the Finnhub path (Yahoo returns 691.9500122070312).
+    data = {**data, **{k: _round(data[k]) for k in ("price", "prev_close", "open", "high", "low")},
+            "volume": _round(data["volume"], 0), "market_cap": _round(data["market_cap"], 0)}
+    return {"ticker": symbol, **data, "pe_ratio": _round(pe_ratio), "change_pct": change_pct,
             "trading_date": _yahoo_trading_date(tk), "source": "yfinance", "fetched_at": _now_iso()}
 
 

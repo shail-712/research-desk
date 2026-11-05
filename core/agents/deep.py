@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -24,7 +25,7 @@ from core import agent as quick_agent
 from core import llm, tickers
 from core.agents import checker, supervisor
 from core.agents.evidence import EvidenceBoard
-from core.agents.specialists import SPECIALISTS, run_specialist
+from core.agents.specialists import Report, incomplete_gap, run_specialist
 from core.config import env_float, env_int
 from core.log import run_in_context
 from core.store import StoreError, get_store
@@ -35,6 +36,7 @@ DEEP_BUDGET_SECONDS = env_float("DEEP_BUDGET_SECONDS", 75)
 DEEP_MODE_DAILY_CAP = env_int("DEEP_MODE_DAILY_CAP", 50)
 FOLLOW_UP_MIN_SECONDS = 30   # only start a second round with this much budget left
 WRITE_RESERVE_SECONDS = 20   # specialists must leave this much time for writing + checking
+SPECIALIST_GRACE_SECONDS = 3  # wait this long past a specialist's deadline before cutting it off
 TOOL_TO_AGENT = {"market": "market", "news": "news", "rag": "filings"}
 TIME_BUDGET_ERROR = "time budget used up"  # core.agents.loop's error when the deadline passes
 # Questions asking for causes or links need several angles, so never take the fast path.
@@ -66,13 +68,31 @@ def _quick(question: str, reason: str, trace: dict) -> dict:
     return result
 
 
+def _overrun_report(agent: str, board: EvidenceBoard) -> Report:
+    """A specialist still running at its deadline: its evidence so far, marked as cut short."""
+    mine = [e for e in board.items() if e.agent == agent]
+    return Report(agent=agent, findings=[{"claim": e.summary[:300], "evidence": [e.id]} for e in mine[:6]],
+                  gaps=[incomplete_gap(agent)], error=TIME_BUDGET_ERROR)
+
+
 def _dispatch(tasks: list[dict], board: EvidenceBoard, deadline: float, companies: list[str]) -> list[dict]:
-    """Runs the round's specialists in parallel."""
+    """Runs the round's specialists in parallel. Each is awaited until its deadline (+ a small
+    grace for its last call to return), never joined after that (review A, S3)."""
     agent_deadline = deadline - WRITE_RESERVE_SECONDS
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+    pool = ThreadPoolExecutor(max_workers=len(tasks))
+    try:
         futures = [pool.submit(run_in_context(run_specialist), t["agent"], t["instruction"], board, agent_deadline, companies)
                    for t in tasks]
-        return [f.result().to_dict() for f in futures]
+        reports = []
+        for t, f in zip(tasks, futures):
+            try:
+                reports.append(f.result(timeout=max(0.0, agent_deadline + SPECIALIST_GRACE_SECONDS - time.monotonic())))
+            except FuturesTimeout:
+                logger.warning("Specialist %s overran its deadline", t["agent"])
+                reports.append(_overrun_report(t["agent"], board))
+        return [r.to_dict() for r in reports]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def answer_deep(question: str) -> dict:

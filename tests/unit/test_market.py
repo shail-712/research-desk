@@ -108,6 +108,20 @@ def test_get_quote_survives_pe_failure():
     assert q["source"] == "yfinance" and q["trading_date"] == "2026-11-04"
 
 
+def test_yahoo_quote_is_rounded_like_the_other_paths():
+    """Review A NIT: Yahoo returned 691.9500122070312."""
+    ticker = mock.MagicMock()
+    ticker.fast_info = {"lastPrice": 691.9500122070312, "regularMarketPreviousClose": 688.3099975585938,
+                        "open": 689.0999755859375, "dayHigh": 693.47998046875, "dayLow": 686.3300170898438,
+                        "lastVolume": 41234567.0, "marketCap": 4832512345678.9}
+    ticker.info = {"trailingPE": 51.23456}
+    ticker.history.return_value = pd.DataFrame({"Close": [691.95]}, index=pd.to_datetime(["2026-11-04"]))
+    with mock.patch.object(market.yf, "Ticker", return_value=ticker):
+        q = market.get_quote("QQQ")
+    assert (q["price"], q["prev_close"], q["open"], q["high"], q["low"]) == (691.95, 688.31, 689.1, 693.48, 686.33)
+    assert q["pe_ratio"] == 51.23 and q["market_cap"] == 4832512345679.0 and q["change_pct"] == 0.53
+
+
 def test_get_quote_without_price_is_an_error():
     ticker = mock.MagicMock()
     ticker.fast_info = {"lastPrice": None}

@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 
 from google.genai import types
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 MAX_STEPS = 3
 MIN_SECONDS_FOR_A_CALL = 4
+TOOL_TIMEOUT_ERROR = "timed out"
 FINAL_NUDGE = "Your tool budget is used up. Write your final output now from the evidence you have."
 
 
@@ -39,6 +41,24 @@ class LoopResult:
 
 def _accept(response) -> bool:
     return bool(response.function_calls) or llm.has_text(response)
+
+
+def run_tools(calls: list, board: EvidenceBoard, agent: str, deadline: float) -> list[dict]:
+    """Runs tool calls in parallel; a call still running at the deadline becomes {"error": "timed out"}."""
+    pool = ThreadPoolExecutor(max_workers=min(4, len(calls)))
+    try:
+        futures = [pool.submit(run_in_context(agent_tools.run_tool), c.name, dict(c.args or {}), board, agent, deadline)
+                   for c in calls]
+        outputs = []
+        for call, future in zip(calls, futures):
+            try:
+                outputs.append(future.result(timeout=max(0.0, deadline - time.monotonic())))
+            except FuturesTimeout:
+                logger.warning("Tool %s timed out at the deadline", call.name)
+                outputs.append({"error": TOOL_TIMEOUT_ERROR})
+        return outputs
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def run_tool_loop(agent: str, system: str, prompt: str, tool_names: list[str], board: EvidenceBoard,
@@ -77,11 +97,11 @@ def run_tool_loop(agent: str, system: str, prompt: str, tool_names: list[str], b
                                  "seconds": round(time.monotonic() - started, 2)})
             return result
 
-        # Run this step's tool calls in parallel, then hand the results back.
+        # Run this step's tool calls in parallel, then hand the results back. Each result is
+        # awaited only until the deadline, and stragglers aren't joined (a `with` block would wait
+        # for them), so a hanging data provider can't push the agent past its budget (review A, S3).
         contents.append(response.candidates[0].content)
-        with ThreadPoolExecutor(max_workers=min(4, len(calls))) as pool:
-            outputs = list(pool.map(run_in_context(lambda c: agent_tools.run_tool(c.name, dict(c.args or {}), board, agent)),
-                                    calls))
+        outputs = run_tools(calls, board, agent, deadline)
         parts = []
         for call, output in zip(calls, outputs):
             parts.append(types.Part.from_function_response(name=call.name, response=output))

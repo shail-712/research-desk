@@ -282,3 +282,85 @@ def test_capitalised_scale_words_match_and_flags_keep_the_original_text():
     # Upper-case unit letters still parse (a plain answer.lower() would break these).
     assert checker.check("Market cap $4,832.5B and $309.7B.", evidence, FAR, use_llm=False).supported == 2
     assert checker.normalise_scale_words("$1.2 Million, 5 Percent, 3 Bn") == "$1.2 million, 5 percent, 3 bn"
+
+
+# ─── review A, S3: the budget bounds tool execution ────────────────────────
+
+def test_a_hanging_tool_times_out_at_the_deadline_and_is_not_joined(monkeypatch):
+    import threading
+    import time as _time
+
+    release = threading.Event()
+    monkeypatch.setattr(loop, "MIN_SECONDS_FOR_A_CALL", 0.1)
+    monkeypatch.setitem(tools._IMPL, "get_quote", lambda b, a, args: release.wait(10) or {"evidence": []})
+    started = _time.monotonic()
+    with mock.patch.object(loop.llm, "call", return_value=response_calls("get_quote", ticker="NVDA")):
+        result = loop.run_tool_loop("market", "sys", "q", ["get_quote"], EvidenceBoard(), started + 0.5)
+    elapsed = _time.monotonic() - started
+    release.set()
+    assert result.steps[0]["error"] == "timed out" and result.error == deep.TIME_BUDGET_ERROR
+    assert elapsed < 2
+
+
+def response_calls(name, **args):
+    call = SimpleNamespace(name=name, args=args)
+    return SimpleNamespace(text=None, function_calls=[call], candidates=[SimpleNamespace(content="model-turn")])
+
+
+def test_a_specialist_that_overruns_is_cut_off_with_its_evidence(monkeypatch):
+    import threading
+    import time as _time
+
+    release = threading.Event()
+    monkeypatch.setattr(deep, "WRITE_RESERVE_SECONDS", 0)
+    monkeypatch.setattr(deep, "SPECIALIST_GRACE_SECONDS", 0.2)
+
+    def slow(agent_name, instruction, board, deadline, companies):
+        board.add(agent_name, "get_quote", "NVDA price $202.06", "Yahoo: NVDA")
+        release.wait(10)
+        return specialists.Report(agent=agent_name)
+    board = EvidenceBoard()
+    started = _time.monotonic()
+    with mock.patch.object(deep, "run_specialist", side_effect=slow):
+        reports = deep._dispatch([{"agent": "market", "instruction": "q"}], board, started + 0.3, ["NVDA"])
+    elapsed = _time.monotonic() - started
+    release.set()
+    assert elapsed < 2
+    assert reports[0]["error"] == deep.TIME_BUDGET_ERROR
+    assert reports[0]["findings"] == [{"claim": "NVDA price $202.06", "evidence": ["E1"]}]
+    assert reports[0]["gaps"] == ["Market Analyst could not complete its search"]
+
+
+def test_finnhub_optional_calls_are_skipped_when_little_time_is_left(monkeypatch):
+    import time as _time
+
+    from core import market
+
+    paths = []
+
+    def get(path, **params):
+        paths.append(path)
+        return {"c": 200.0, "pc": 198.0, "t": 1762300800} if path == "quote" else {"marketCapitalization": 1000.0}
+    monkeypatch.setattr(market, "_finnhub_get", get)
+    with market.deadline(_time.monotonic() + 3):
+        q = market._finnhub_detail("NVDA")
+    assert paths == ["quote"] and q["market_cap"] is None and q["price"] == 200.0
+    paths.clear()
+    market._finnhub_detail("NVDA")   # no deadline: everything as before
+    assert paths == ["quote", "stock/profile2", "stock/metric"]
+    assert market.seconds_left() is None
+
+
+def test_run_tool_passes_the_deadline_to_market_data():
+    import time as _time
+
+    seen = []
+
+    def quote(ticker):
+        from core import market
+        seen.append(market.seconds_left())
+        return QUOTE
+    with mock.patch.object(tools.market, "get_quote", side_effect=quote):
+        tools.run_tool("get_quote", {"ticker": "NVDA"}, EvidenceBoard(), "market", _time.monotonic() + 30)
+        tools.run_tool("get_quote", {"ticker": "NVDA"}, EvidenceBoard(), "market")
+    assert 25 < seen[0] <= 30 and seen[1] is None
