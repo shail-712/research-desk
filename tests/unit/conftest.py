@@ -79,3 +79,17 @@ def sec_tickers(monkeypatch):
     monkeypatch.setattr(tickers, "_fetch_sec_list", lambda: SEC_ROWS)
     tickers.reset_cache()
     return tickers
+
+
+@pytest.fixture
+def dynamo_store(aws_env):
+    """DynamoStore on moto's in-memory DynamoDB, with the table from TABLE_DEFINITION."""
+    import boto3
+    from moto import mock_aws
+
+    from core.store_dynamo import DynamoStore, create_table
+
+    with mock_aws():
+        resource = boto3.resource("dynamodb", region_name="ap-south-1")
+        create_table(resource, "ResearchDesk")
+        yield DynamoStore("ResearchDesk", resource=resource)

@@ -2,6 +2,14 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## Phase B — AWS code, price alerts + Telegram (branch `phase-B-aws` from `phase-1-core`; started 2026-11-05)
+
+Tonight's scope (your 11-05 instruction): B.1, B.2, B.3, B.6 and B.7 code + template only. Not done: B.4 index upload, B.5 / B.7 deploys, pushes. Phase A's S6 (last 45 KB chunks + filing re-run) still waits for the 11-06 quota.
+
+| Task | Status | What changed | How verified |
+|---|---|---|---|
+| B.1 DynamoDB store | done | `core/store_dynamo.py` PORT of v1 (73b6fda): single table (SPEC §4), transactional dedupe (`SEEN#` marker + `FEED` item in one `TransactWriteItems`), TTLs (FEED 30 d, SEEN 90 d, JOB 1 d), async job methods, `TABLE_DEFINITION` mirroring the template. Dropped `supports_vectors` (pgvector, D4). `get_store()` already selects it for `STORE_BACKEND=dynamodb`. | moto tests (`test_store_dynamo.py`, 12): watchlist upsert keeps `added_at`, seed only when empty, dedupe incl. 5 racing threads → exactly 1, feed newest-first without internal keys, notify bookkeeping, state, job lifecycle, TTLs on markers and jobs, missing table → `StoreError("Database error (ResourceNotFoundException)")`, Deep's daily counter on DynamoDB. pytest 277 passed. |
+
 ## Phase A — Local core, knowledge base, agents, local eval (branch `phase-1-core`, kept from PLAN rev 2; started 2026-11-05)
 
 PLAN rev 3 (2026-11-05) re-labelled the phases. Rev 2 tasks map 1.0→A.0, 1.1→A.1, 1.2→A.2, 1.3→A.3, 1.4→A.4, 1.5→A.5. Commit messages before the relabel use the rev 2 numbers. A.2 was done as a same-day v1 rerun before rev 3 arrived; D14 records it.
