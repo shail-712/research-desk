@@ -102,6 +102,8 @@ def run_specialist(agent: str, instruction: str, board: EvidenceBoard, deadline:
     prompt = instruction
     if companies:
         prompt += f"\n\nCompanies (tickers): {', '.join(companies)}"
+        if agent == "filings" and len(companies) > 1:
+            prompt += each_company_instruction(companies)
     loop = run_tool_loop(agent, spec["system"], prompt, spec["tools"], board, deadline)
     findings, gaps = parse_report(agent, loop.text)
     report = Report(agent=agent, findings=findings, gaps=gaps, steps=loop.steps, llm_calls=loop.llm_calls,
@@ -111,5 +113,20 @@ def run_specialist(agent: str, instruction: str, board: EvidenceBoard, deadline:
         mine = [e for e in board.items() if e.agent == agent]
         report.findings = [{"claim": e.summary[:300], "evidence": [e.id]} for e in mine[:6]]
         if loop.error:
-            report.gaps.append(f"{spec['title']} stopped early: {loop.error}")
+            # The detail (model name, HTTP status) stays in report.error and the trace; the writer
+            # only sees a neutral gap, so it can't leak into the answer (review A, S1).
+            report.gaps.append(incomplete_gap(agent))
     return report
+
+
+def incomplete_gap(agent: str) -> str:
+    return f"{SPECIALISTS[agent]['title']} could not complete its search"
+
+
+def each_company_instruction(companies: list[str]) -> str:
+    """Review A, S2: with several companies, one search per company, so no company's figures are
+    left to the writer's memory. latest_filing has dates only."""
+    return (f"\nSearch EACH company's filings separately: call search_filings once per ticker "
+            f"({', '.join(companies)}) with that ticker set, before writing. latest_filing gives filing "
+            "dates only, never financial figures; if a company's figures are not in the passages, list it "
+            "under GAPS.")

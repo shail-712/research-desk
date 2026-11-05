@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 from core import llm
-from core.agents import checker, deep, specialists, supervisor, tools
+from core.agents import checker, deep, loop, specialists, supervisor, tools
 from core.agents.evidence import EvidenceBoard
 
 FAR = 10**12
@@ -196,3 +196,28 @@ def test_request_id_reaches_specialist_threads(no_checker_llm):
          mock.patch.object(deep.supervisor, "write", return_value="A [E1]."):
         deep.answer_deep("Compare NVIDIA and AMD revenue and stock moves")
     assert seen == ["req-deep", "req-deep"]
+
+
+# ─── review A, S1: internal errors never reach the writer ──────────────────
+
+def test_model_error_stays_in_the_report_and_the_writer_gets_a_neutral_gap():
+    board = EvidenceBoard()
+    board.add("filings", "latest_filing", "AMD latest 10-K: fiscal period ended 2025-12-27", "SEC AMD 10-K")
+    outage = loop.LoopResult(text=None, llm_calls=1,
+                             error="model unavailable (gemini-3.8-flash: HTTP 503)")
+    with mock.patch.object(specialists, "run_tool_loop", return_value=outage):
+        report = specialists.run_specialist("filings", "AMD revenue", board, FAR, ["AMD"])
+    assert report.error == "model unavailable (gemini-3.8-flash: HTTP 503)"   # kept for the trace
+    assert report.gaps == ["Filings Analyst could not complete its search"]
+    with mock.patch.object(supervisor.llm, "call", return_value=SimpleNamespace(text="AMD: no data [Findings].")) as call:
+        text = supervisor.write("AMD revenue?", [report.to_dict()], board, FAR)
+    prompt = call.call_args.args[0]
+    assert "503" not in prompt and "gemini" not in prompt.lower() and "could not complete its search" in prompt
+    assert text == "AMD: no data."   # fake [Findings] citation removed
+
+
+def test_fake_citation_cleanup_keeps_evidence_ids_and_links():
+    raw = "Revenue $13.4B [E3]. Gap noted [findings]. See [Findings](https://x) and [Specialist]."
+    with mock.patch.object(supervisor.llm, "call", return_value=SimpleNamespace(text=raw)):
+        text = supervisor.write("q", [], EvidenceBoard(), FAR)
+    assert text == "Revenue $13.4B [E3]. Gap noted. See [Findings](https://x) and."

@@ -6,6 +6,7 @@ Planning and follow-up use Gemini JSON-schema output, so parsing is reliable.
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -55,9 +56,14 @@ Rules:
 - Copy numbers exactly as they appear in the evidence; do not compute new ones unless
   you show the inputs (e.g. "up from $35.1B [E5] to $57.0B [E4]").
 - Say how current the data is (quote time, session date, filing period).
-- If something was asked but not found, say so briefly.
+- If something was asked but not found, say so briefly. NOT FOUND lines have no evidence:
+  mention the gap in plain words, without a citation and without numbers.
+- Cite only evidence IDs like [E4]. Never cite [Findings], a specialist or anything else.
 - Concise markdown: a one-line direct answer, then short sections or bullets.
 - No investment advice."""
+
+# Citations of things that aren't evidence (seen in the 11-05 eval: "[Findings]"). Not markdown links.
+_FAKE_CITATION = re.compile(r"\s*\[(?:findings?|specialists?|gaps?|not found|evidence)\](?!\()", re.I)
 
 
 def _json_call(system: str, prompt: str, schema, deadline: float) -> dict:
@@ -107,11 +113,12 @@ def write(question: str, reports: list[dict], board: EvidenceBoard, deadline: fl
         for f in r["findings"]:
             findings.append(f"- ({title}) {f['claim']} [{', '.join(f['evidence'])}]")
         for g in r["gaps"]:
-            findings.append(f"- ({title}) NOT FOUND: {g}")
+            findings.append(f"- ({title}) NOT FOUND (no evidence ID): {g}")
     cited = {i for r in reports for f in r["findings"] for i in f["evidence"]}
     prompt = (f"Today is {datetime.now(timezone.utc):%Y-%m-%d} (UTC).\n\nQUESTION:\n{question}\n\n"
               f"FINDINGS FROM SPECIALISTS:\n" + "\n".join(findings or ["- (none)"]) +
               f"\n\nEVIDENCE:\n{board.for_prompt(sorted(cited, key=lambda x: int(x[1:])) or None, 700)}")
     remaining = deadline - time.monotonic()
     config = types.GenerateContentConfig(system_instruction=WRITE_SYSTEM, temperature=0.2, max_output_tokens=1400)
-    return llm.call(prompt, config, budget_seconds=max(5.0, min(remaining, 45))).text.strip()
+    text = llm.call(prompt, config, budget_seconds=max(5.0, min(remaining, 45))).text.strip()
+    return _FAKE_CITATION.sub("", text)

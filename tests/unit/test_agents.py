@@ -138,7 +138,7 @@ def test_specialist_uses_only_its_tools_and_falls_back_to_raw_evidence():
     assert run.call_args.args[3] == ["get_quote", "get_quotes"]
     assert "Companies (tickers): NVDA" in run.call_args.args[2]
     assert report.findings == [{"claim": "NVDA price $202.06", "evidence": ["E1"]}]
-    assert any("stopped early" in g for g in report.gaps)
+    assert report.gaps == ["Market Analyst could not complete its search"]  # review A, S1: no internal detail
 
 
 # ─── supervisor ──────────────────────────────────────────────────────────────
