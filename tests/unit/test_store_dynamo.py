@@ -1,7 +1,6 @@
 """DynamoStore against moto's in-memory DynamoDB: single-table design, transactional dedupe.
 Ported from v1 tests/unit/test_store_dynamo.py (73b6fda)."""
 
-import threading
 
 import pytest
 
@@ -44,18 +43,21 @@ def test_insert_event_is_transactionally_deduped(dynamo_store):
     assert marker["feed_sk"] == first["id"]
 
 
-def test_concurrent_inserts_record_exactly_one(dynamo_store):
-    results = []
+def test_dedupe_is_one_conditional_transaction(dynamo_store):
+    """Two racing scans can't both record an alert: the SEEN marker's `attribute_not_exists`
+    condition and the FEED put are ONE TransactWriteItems, so DynamoDB applies both or neither.
+    (moto doesn't serialise concurrent transactions, so a threaded race test is flaky locally;
+    this checks the request the guarantee rests on.)"""
+    from unittest import mock
 
-    def worker():
-        results.append(dynamo_store.insert_event(_event("race")))
-
-    threads = [threading.Thread(target=worker) for _ in range(5)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert sum(r is not None for r in results) == 1
+    real = dynamo_store.client.transact_write_items
+    with mock.patch.object(dynamo_store.client, "transact_write_items", side_effect=real) as tx:
+        dynamo_store.insert_event(_event("race"))
+    [items] = [c.kwargs["TransactItems"] for c in tx.call_args_list]
+    marker, feed = items[0]["Put"], items[1]["Put"]
+    assert marker["Item"]["pk"] == "SEEN#race" and marker["ConditionExpression"] == "attribute_not_exists(pk)"
+    assert feed["Item"]["pk"] == "FEED" and marker["Item"]["feed_sk"] == feed["Item"]["sk"]
+    assert dynamo_store.insert_event(_event("race")) is None
     assert len(dynamo_store.recent_events()) == 1
 
 
