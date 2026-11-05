@@ -1,0 +1,9 @@
+# Only the code and requirements-lambda.txt go into the image: never data/ (index, embedding
+# cache), .env, tests or docs. Ported from v1 .dockerignore (73b6fda).
+*
+!core/
+!aws_lambda/
+!jobs/
+!requirements-lambda.txt
+**/__pycache__
+**/*.pyc

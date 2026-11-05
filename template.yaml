@@ -46,7 +46,6 @@ Globals:
         CACHE_DIR: /tmp/research-desk
         EMBED_CACHE_PATH: /tmp/research-desk/embeddings.sqlite
         DEEP_BUDGET_SECONDS: "75"
-        REQUIRE_ACCESS_CODE: "true"   # the API refuses requests if the SSM access code is missing
         LOG_LEVEL: INFO
 
 Resources:

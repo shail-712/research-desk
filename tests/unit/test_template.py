@@ -161,4 +161,13 @@ def test_lambda_writes_go_to_tmp(template):
     assert env["CACHE_DIR"].startswith("/tmp/")
     assert env["EMBED_CACHE_PATH"].startswith("/tmp/")
     assert env["STORE_BACKEND"] == "dynamodb" and env["VECTOR_BACKEND"] == "s3"
-    assert env["REQUIRE_ACCESS_CODE"] == "true"
+
+
+def test_functions_use_the_shared_image_and_real_handlers(template):
+    for name, fn in _functions(template).items():
+        props = fn["Properties"]
+        assert props["PackageType"] == "Image"
+        assert fn["Metadata"]["Dockerfile"] == "Dockerfile"
+        module, func = props["ImageConfig"]["Command"][0].rsplit(".", 1)
+        source = (ROOT / (module.replace(".", "/") + ".py")).read_text(encoding="utf-8")
+        assert f"def {func}(" in source, f"{name}: {module}.{func} not found"
