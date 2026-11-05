@@ -331,3 +331,12 @@ def test_lambda_requirements_match_the_main_pins():
     lam, main = pins("requirements-lambda.txt"), pins("requirements.txt")
     assert lam and all(main.get(pkg) == ver for pkg, ver in lam.items())
     assert "streamlit" not in lam
+
+
+def test_image_copies_every_package_the_handlers_import():
+    """aws_lambda/scan.py imports jobs.scan: a package missing from the Dockerfile only fails on Lambda."""
+    copied = {c.split("/")[0] for c in re.findall(r"^COPY (\S+) \$\{LAMBDA_TASK_ROOT\}", (ROOT / "Dockerfile").read_text(), re.M)}
+    imported = set()
+    for path in (ROOT / "aws_lambda").glob("*.py"):
+        imported |= set(re.findall(r"^\s*(?:from|import) (core|jobs|aws_lambda)\b", path.read_text(encoding="utf-8"), re.M))
+    assert imported and imported <= copied, imported - copied

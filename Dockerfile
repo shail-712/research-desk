@@ -8,6 +8,7 @@ COPY requirements-lambda.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
 
 COPY core ${LAMBDA_TASK_ROOT}/core
+COPY jobs ${LAMBDA_TASK_ROOT}/jobs
 COPY aws_lambda ${LAMBDA_TASK_ROOT}/aws_lambda
 
 CMD ["aws_lambda.api.handler"]
