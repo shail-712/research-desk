@@ -16,8 +16,19 @@ venv/
 data/raw/*
 data/processed/*
 
-# Old AWS-era index copy (stale vectors from a retired model). Safe to delete locally.
-aws_artifacts/
-
 # AWS SAM build output
 .aws-sam/
+
+# Secrets variants, local stores, indexes, caches (PLAN section 0.2)
+.env.*
+!.env.example
+env.json
+*.db
+*.sqlite*
+*.faiss
+data/index/
+data/cache/
+vectors/
+evals/results/
+.coverage
+htmlcov/

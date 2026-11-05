@@ -1,0 +1,18 @@
+# Research Desk runtime (CLI, Lambda, Streamlit). Pinned.
+google-genai==2.17.0
+yfinance==0.2.63
+pandas==2.3.3
+numpy==2.2.6
+feedparser==6.0.12
+requests==2.33.1
+python-dotenv==1.0.1
+tzdata==2025.2          # America/New_York on Windows
+
+# Vector index (local files or S3)
+faiss-cpu==1.11.0
+
+# AWS backends (DynamoDB store, S3 vectors, SSM secrets)
+boto3==1.38.37
+
+# Frontend (Streamlit Community Cloud)
+streamlit==1.66.1
