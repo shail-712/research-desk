@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Research Desk - API Gateway HTTP API + Lambda (one container image) for Quick / Deep research
+  answers, DynamoDB single table (provisioned 2/2, TTL, Streams), FAISS index on S3 (Retain),
+  SSM SecureString secrets, 14-day logs, $1 budget. Region ap-south-1. See docs/SPEC.md §3.
+  Adapted from v1 template.yaml (73b6fda): digest/SES, filing resources, X-Ray and the dashboard
+  cut (D3, D13); own ECR repository with a lifecycle policy; Retain on the data bucket.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Email for the budget alert (and alarms). Blank = no budget / no email.
+  SsmPath:
+    Type: String
+    Default: /research-desk
+    AllowedPattern: '^/[A-Za-z0-9_./-]*[A-Za-z0-9_.-]$'
+    Description: SSM Parameter Store path (no trailing slash) holding the SecureString secrets.
+  BudgetLimitUsd:
+    Type: Number
+    Default: 1
+  ImageRepositoryName:
+    Type: String
+    Default: research-desk
+    AllowedPattern: '^[a-z0-9][a-z0-9._/-]*$'
+    Description: Name of the ECR repository the function image is pushed to.
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+    MemorySize: 1024
+    Timeout: 30
+    Environment:
+      Variables:
+        STORE_BACKEND: dynamodb
+        DDB_TABLE: !Ref Table
+        VECTOR_BACKEND: s3
+        VECTOR_BUCKET: !Ref DataBucket
+        VECTOR_KEY: vectors/index.npz
+        SSM_PREFIX: !Ref SsmPath
+        # Lambda's filesystem is read-only except /tmp (SEC ticker list, query-embedding cache).
+        CACHE_DIR: /tmp/research-desk
+        EMBED_CACHE_PATH: /tmp/research-desk/embeddings.sqlite
+        DEEP_BUDGET_SECONDS: "75"
+        REQUIRE_ACCESS_CODE: "true"   # the API refuses requests if the SSM access code is missing
+        LOG_LEVEL: INFO
+
+Resources:
+  # ── Image ───────────────────────────────────────────────────────────────────
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ImageRepositoryName
+      ImageScanningConfiguration: {ScanOnPush: false}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "Keep the 2 newest images",
+                      "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 2},
+                      "action": {"type": "expire"}}]}
+
+  # ── Data ────────────────────────────────────────────────────────────────────
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED          # the always-free tier covers provisioned capacity, not on-demand
+      ProvisionedThroughput: {ReadCapacityUnits: 2, WriteCapacityUnits: 2}
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      StreamSpecification: {StreamViewType: NEW_IMAGE}
+
+  # The FAISS index (vectors/index.npz). It cost embedding quota to build (D11), so it outlives
+  # the stack: `sam delete` leaves it, and it is deleted by hand when the project ends.
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+
+  # ── API ─────────────────────────────────────────────────────────────────────
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10       # protects the free Gemini / Yahoo / Finnhub quotas
+        ThrottlingRateLimit: 5
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageConfig: {Command: ["aws_lambda.api.handler"]}
+      MemorySize: 512
+      Timeout: 29                      # just under API Gateway's 30 s integration limit
+      Environment:
+        Variables:
+          ASK_WORKER_FUNCTION: !Ref AskWorkerFunction
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref Table}
+        - LambdaInvokePolicy: {FunctionName: !Ref AskWorkerFunction}
+        - Statement: &ssmRead
+            - Effect: Allow
+              Action: [ssm:GetParametersByPath]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/*"
+            - Effect: Allow
+              Action: [kms:Decrypt]          # SecureString with the AWS-managed aws/ssm key
+              Resource: "*"
+              Condition:
+                StringEquals: {"kms:ViaService": !Sub "ssm.${AWS::Region}.amazonaws.com"}
+      Events:
+        Proxy:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Path: "/{proxy+}", Method: ANY}
+    Metadata: &image
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: python3.12-v2
+
+  AskWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageConfig: {Command: ["aws_lambda.ask_worker.handler"]}
+      Timeout: 120                     # Deep mode budget is 75 s
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0        # the job item records failures; don't rerun long LLM work
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref Table}
+        - Statement:
+            - Effect: Allow            # read-only, and only the index object (HeadObject needs GetObject)
+              Action: [s3:GetObject]
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${DataBucket}/vectors/*"
+        - Statement: *ssmRead
+    Metadata: *image
+
+  # ── Logs: 14-day retention (log groups otherwise keep data forever) ─────────
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: !Sub "/aws/lambda/${ApiFunction}", RetentionInDays: 14}
+  AskWorkerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: !Sub "/aws/lambda/${AskWorkerFunction}", RetentionInDays: 14}
+
+  # ── Cost guard ──────────────────────────────────────────────────────────────
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasAlertEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: {Amount: !Ref BudgetLimitUsd, Unit: USD}
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 50}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
+        - Notification: {NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for Postman ({{base_url}}) and Streamlit (DESK_API_URL).
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+  TableName:
+    Value: !Ref Table
+  DataBucketName:
+    Value: !Ref DataBucket
+  ImageRepositoryUri:
+    Description: Pass to `sam deploy --image-repository`.
+    Value: !GetAtt ImageRepository.RepositoryUri
