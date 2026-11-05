@@ -39,6 +39,15 @@ def isolated(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def local_store():
+    from core import store
+
+    store.reset_store()
+    yield store.get_store()
+    store.reset_store()
+
+
+@pytest.fixture
 def aws_env(monkeypatch):
     """Fake credentials + region so boto3 never touches a real account."""
     for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",

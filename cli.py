@@ -8,6 +8,7 @@ Command-line access to the tools.
     python cli.py ingest NVDA AMD INTC [--dry-run]  # build / extend the knowledge base
     python cli.py retriever "Compare NVIDIA and AMD data center revenue"
     python cli.py agent "What is AMD's market cap and P/E ratio, and what are the latest headlines?"
+    python cli.py agent --deep "Compare NVIDIA's and AMD's data center segment revenue"
 
 Adapted from v1 cli.py (73b6fda).
 """
@@ -43,6 +44,7 @@ def main(argv=None) -> int:
     p.add_argument("--top-k", type=int, default=5)
     p = sub.add_parser("agent")
     p.add_argument("query", nargs="?", default="What is NVIDIA's stock price and latest news?")
+    p.add_argument("--deep", action="store_true", help="multi-agent mode (supervisor + specialists + fact-checker)")
     args = parser.parse_args(argv)
     setup_logging(env("LOG_LEVEL", "WARNING"))  # JSON logs go to stderr; results to stdout
 
@@ -76,7 +78,12 @@ def main(argv=None) -> int:
             chunks = retriever.search(args.query, args.top_k)
             _print([{**c, "text": c["text"][:200] + "..."} for c in chunks])
         elif args.cmd == "agent":
-            result = agent.answer(args.query)
+            if args.deep:
+                from core.agents.deep import answer_deep
+
+                result = answer_deep(args.query)
+            else:
+                result = agent.answer(args.query)
             result.pop("context", None)
             _print(result)
             return 0 if result["answer"] else 2
