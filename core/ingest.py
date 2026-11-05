@@ -428,8 +428,8 @@ def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, 
     return stats
 
 
-def print_report(stats: dict, dry_run: bool, out=sys.stdout) -> None:
-    w = out.write
+def print_report(stats: dict, dry_run: bool, out=None) -> None:
+    w = (out or sys.stdout).write
     for f in stats["filings"]:
         w(f"{f['ticker']} {f['form']}  accession {f['accession']}  period {f['period']}  filed {f['filed']}\n")
         w(f"    {f['url']}\n")
