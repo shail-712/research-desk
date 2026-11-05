@@ -169,6 +169,14 @@ def render_section(target: str, items: list[dict], results: dict, baseline: dict
     return "\n".join(out)
 
 
+SCORER_QUIRKS = (
+    "**Known quirks of the frozen scorer (D8).** They apply equally to v1 and v2, so the comparison stays fair, "
+    "but they move the absolute numbers: (1) a Markdown heading that contains a digit (\"Q3 2026\") counts as a "
+    "numeric line that needs a citation; (2) scale words are only parsed in lower case, so \"$4,832.5 Billion\" "
+    "reads as 4,832.5 and a correct figure counts as not traceable (Quick c5's two on 2026-11-05). The live "
+    "fact-checker normalises scale words before matching (review A, S5); the scorer does not.")
+
+
 def write_report(target: str, section_md: str, path: Path = REPORT) -> None:
     """Replaces this target's section in the report, keeping the other one."""
     name = SECTIONS[target]
@@ -181,6 +189,7 @@ def write_report(target: str, section_md: str, path: Path = REPORT) -> None:
                 "Scored by the frozen v1 scorer (`evals/scoring.py`, D8). Every metric is computed by code; no LLM judge. "
                 "\"Not traceable\" counts numbers the fact-checker's code stage can't find in that answer's evidence "
                 "(derived numbers such as growth rates count too, in both versions).\n\n"
+                + SCORER_QUIRKS + "\n\n"
                 "<!-- section:local -->\n## Local\n\n_Not run yet._\n<!-- /section:local -->\n\n"
                 "<!-- section:api -->\n## Deployed\n\n_Not run yet (Phase C)._\n<!-- /section:api -->\n")
     pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end), re.S)

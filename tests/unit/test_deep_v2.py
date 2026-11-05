@@ -221,3 +221,64 @@ def test_fake_citation_cleanup_keeps_evidence_ids_and_links():
     with mock.patch.object(supervisor.llm, "call", return_value=SimpleNamespace(text=raw)):
         text = supervisor.write("q", [], EvidenceBoard(), FAR)
     assert text == "Revenue $13.4B [E3]. Gap noted. See [Findings](https://x) and."
+
+
+# ─── review A, S2: per-company filing search; numbers cited to metadata ─────
+
+def test_filings_instruction_asks_for_each_company_when_there_are_several():
+    fake = loop.LoopResult(text="FINDINGS:\n- x [E1]")
+    with mock.patch.object(specialists, "run_tool_loop", return_value=fake) as run:
+        specialists.run_specialist("filings", "Compare revenue", EvidenceBoard(), FAR, ["NVDA", "AMD", "INTC"])
+        several = run.call_args.args[2]
+        specialists.run_specialist("filings", "NVDA revenue", EvidenceBoard(), FAR, ["NVDA"])
+        one = run.call_args.args[2]
+        specialists.run_specialist("market", "Compare prices", EvidenceBoard(), FAR, ["NVDA", "AMD"])
+        market = run.call_args.args[2]
+    assert "search_filings once per ticker (NVDA, AMD, INTC)" in several
+    assert "once per ticker" not in one and "once per ticker" not in market
+
+
+META = {"E4": "AMD latest 10-K: fiscal period ended 2025-12-27, filed 2026-02-04 (accession 0000002488-26-000018)"}
+BOARD_TEXT = META["E4"] + "\nAMD 10-K MD&A: net revenue was $34,639 million; data center $16,635 million"
+
+
+def test_number_cited_only_to_latest_filing_metadata_is_flagged():
+    """The c1 case: '$23,302 million [E4]' where E4 is a latest_filing line. Even a figure that IS
+    elsewhere on the board is flagged when its citation points at metadata."""
+    draft = ("AMD revenue was $23,302 million [E4].\n"
+             "AMD data center was $16,635 million [E4].\n"
+             "AMD net revenue was $34,639 million [E5].\n"
+             "The 10-K was filed 2026-02-04 [E4].")
+    meta = {"E4": META["E4"]}
+    with mock.patch.object(checker.llm, "call", return_value=SimpleNamespace(
+            text='{"verdicts": [{"number": "$23,302 million", "verdict": "derived"}]}')):
+        v = checker.check(draft, BOARD_TEXT, FAR, metadata=meta)
+    assert v.unsupported == ["$23,302 million", "$16,635 million"]      # stage 2 can't rescue a mis-citation
+    assert "$34,639 million [E5]" in v.answer and "$34,639 million" + checker.UNVERIFIED_MARK not in v.answer
+    assert "$16,635 million" + checker.UNVERIFIED_MARK + " [E4]" in v.answer
+    assert v.numbers_checked == 3 and v.supported == 1                    # the date is not a checked number
+
+
+def test_deep_passes_latest_filing_items_to_the_checker(no_checker_llm):
+    def run(agent_name, instruction, board, deadline, companies):
+        board.add(agent_name, "latest_filing", META["E4"], "SEC AMD 10-K", "https://s")
+        board.add(agent_name, "search_filings", "AMD revenue was $6,819 million", "AMD 10-Q", "https://s")
+        return specialists.Report(agent=agent_name, findings=[{"claim": "c", "evidence": ["E1"]}])
+    with mock.patch.object(deep, "run_specialist", side_effect=run), \
+         mock.patch.object(deep.supervisor, "write", return_value="AMD revenue was $6,819 million [E1]."):
+        result = deep.answer_deep("What was AMD's revenue?")
+    assert result["answer"] == "AMD revenue was $6,819 million" + checker.UNVERIFIED_MARK + " [E1]."
+
+
+# ─── review A, S5: capitalised scale words ─────────────────────────────────
+
+def test_capitalised_scale_words_match_and_flags_keep_the_original_text():
+    evidence = "NVDA market cap $4,832.5B; AMD market cap $309.7B"
+    v = checker.check("| NVDA | $4,832.5 Billion [E1] |\n| AMD | $309.7 BILLION [E2] |", evidence, FAR, use_llm=False)
+    assert v.supported == 2 and v.unsupported == []
+    v = checker.check("Revenue was $99.9 Billion [E1].", evidence, FAR, use_llm=False)
+    assert v.answer == "Revenue was $99.9 Billion" + checker.UNVERIFIED_MARK + " [E1]."
+    assert v.unsupported == ["$99.9 Billion"]
+    # Upper-case unit letters still parse (a plain answer.lower() would break these).
+    assert checker.check("Market cap $4,832.5B and $309.7B.", evidence, FAR, use_llm=False).supported == 2
+    assert checker.normalise_scale_words("$1.2 Million, 5 Percent, 3 Bn") == "$1.2 million, 5 percent, 3 bn"

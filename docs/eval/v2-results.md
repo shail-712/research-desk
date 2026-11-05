@@ -2,6 +2,8 @@
 
 Scored by the frozen v1 scorer (`evals/scoring.py`, D8). Every metric is computed by code; no LLM judge. "Not traceable" counts numbers the fact-checker's code stage can't find in that answer's evidence (derived numbers such as growth rates count too, in both versions).
 
+**Known quirks of the frozen scorer (D8).** They apply equally to v1 and v2, so the comparison stays fair, but they move the absolute numbers: (1) a Markdown heading that contains a digit ("Q3 2026") counts as a numeric line that needs a citation; (2) scale words are only parsed in lower case, so "$4,832.5 Billion" reads as 4,832.5 and a correct figure counts as not traceable (Quick c5's two on 2026-11-05). The live fact-checker normalises scale words before matching (review A, S5); the scorer does not.
+
 <!-- section:local -->
 ## Local
 

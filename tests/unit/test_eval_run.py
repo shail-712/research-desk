@@ -103,6 +103,7 @@ def test_report_sections_are_replaced_independently(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "local v2" in text and "local v1" not in text and "deployed v1" in text
     assert text.index("## Local") < text.index("## Deployed")
+    assert text.count("Known quirks of the frozen scorer (D8)") == 1 and "Billion" in text   # review A, S5
 
 
 def test_render_section_compares_with_the_v1_baseline():

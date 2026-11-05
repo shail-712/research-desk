@@ -123,7 +123,8 @@ def answer_deep(question: str) -> dict:
         draft = supervisor.write(question, reports, board, deadline)
     except llm.LLMUnavailableError as e:
         return _quick(question, f"writer unavailable: {e}", trace)
-    verdict = checker.check(draft, board.text(), deadline)
+    metadata = {e.id: e.summary for e in board.items() if e.tool in checker.METADATA_TOOLS}
+    verdict = checker.check(draft, board.text(), deadline, metadata=metadata)
     trace["checker"] = {k: v for k, v in verdict.to_dict().items() if k != "answer"}
 
     cited = set(re.findall(r"\bE\d+\b", verdict.answer))
