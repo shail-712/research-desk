@@ -9,6 +9,7 @@ Command-line access to the tools.
     python cli.py retriever "Compare NVIDIA and AMD data center revenue"
     python cli.py agent "What is AMD's market cap and P/E ratio, and what are the latest headlines?"
     python cli.py agent --deep "Compare NVIDIA's and AMD's data center segment revenue"
+    python cli.py scan [--dry-run] [--replay INTC:-7.5]   # price alerts for the watchlist
 
 Adapted from v1 cli.py (73b6fda).
 """
@@ -46,6 +47,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("agent")
     p.add_argument("query", nargs="?", default="What is NVIDIA's stock price and latest news?")
     p.add_argument("--deep", action="store_true", help="multi-agent mode (supervisor + specialists + fact-checker)")
+    p = sub.add_parser("scan")
+    p.add_argument("--dry-run", action="store_true", help="print what would fire; write nothing")
+    p.add_argument("--replay", metavar="TICKER:PCT", help="demo: replay a move, e.g. INTC:-7.5")
     args = parser.parse_args(argv)
     setup_logging(env("LOG_LEVEL", "WARNING"))  # JSON logs go to stderr; results to stdout
 
@@ -78,6 +82,10 @@ def main(argv=None) -> int:
         elif args.cmd == "retriever":
             chunks = retriever.search(args.query, args.top_k)
             _print([{**c, "text": c["text"][:200] + "..."} for c in chunks])
+        elif args.cmd == "scan":
+            from jobs import scan
+
+            _print(scan.run(dry_run=args.dry_run, replay=args.replay))
         elif args.cmd == "agent":
             if args.deep:
                 from core.agents.deep import answer_deep

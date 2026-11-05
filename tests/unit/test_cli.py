@@ -75,3 +75,16 @@ def test_retriever_error_is_a_one_line_error(monkeypatch, capsys):
     monkeypatch.setattr(retriever, "search", down)
     assert cli.main(["retriever", "x"]) == 1
     assert capsys.readouterr().err.strip() == "Error: Document index is unavailable"
+
+
+def test_scan_is_wired_and_a_bad_replay_is_a_one_line_error(monkeypatch, capsys):
+    from jobs import scan
+
+    calls = []
+    monkeypatch.setattr(scan, "run", lambda **kw: calls.append(kw) or {"price_events": ["INTC -7.5% (replay)"]})
+    assert cli.main(["scan", "--dry-run", "--replay", "INTC:-7.5"]) == 0
+    assert calls == [{"dry_run": True, "replay": "INTC:-7.5"}]
+    assert "INTC -7.5% (replay)" in capsys.readouterr().out
+    monkeypatch.setattr(scan, "run", lambda **kw: scan.parse_replay("INTC"))
+    assert cli.main(["scan", "--replay", "INTC"]) == 1
+    assert capsys.readouterr().err.startswith("Error: Replay must look like TICKER:PCT")
