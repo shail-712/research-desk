@@ -39,6 +39,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("ingest")
     p.add_argument("tickers", nargs="+")
     p.add_argument("--dry-run", action="store_true", help="show filings, sections and embedding cost only")
+    p.add_argument("--focus", nargs="*", default=None, help="embed these tickers' chunks first (e.g. NVDA)")
     p = sub.add_parser("retriever")
     p.add_argument("query", nargs="?", default="Compare NVIDIA and AMD data center revenue")
     p.add_argument("--top-k", type=int, default=5)
@@ -71,7 +72,7 @@ def main(argv=None) -> int:
         elif args.cmd == "ingest":
             from core import ingest
 
-            stats = ingest.ingest(args.tickers, dry_run=args.dry_run)
+            stats = ingest.ingest(args.tickers, dry_run=args.dry_run, focus=args.focus)
             ingest.print_report(stats, args.dry_run)
             return 1 if stats["stopped"] else 0
         elif args.cmd == "retriever":

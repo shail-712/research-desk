@@ -45,10 +45,10 @@ def test_ingest_dry_run_is_wired(monkeypatch, capsys):
     from core import ingest
 
     seen = {}
-    monkeypatch.setattr(ingest, "ingest", lambda t, dry_run: seen.update(t=t, dry=dry_run) or {
+    monkeypatch.setattr(ingest, "ingest", lambda t, dry_run, focus=None: seen.update(t=t, dry=dry_run, focus=focus) or {
         "filings": [], "chunks": 0, "new_chunks": 0, "need_api": 0, "used_today": 0, "daily_cap": 400, "stopped": None})
-    assert cli.main(["ingest", "NVDA", "--dry-run"]) == 0
-    assert seen == {"t": ["NVDA"], "dry": True} and "Total chunks 0" in capsys.readouterr().out
+    assert cli.main(["ingest", "NVDA", "--dry-run", "--focus", "NVDA"]) == 0
+    assert seen == {"t": ["NVDA"], "dry": True, "focus": ["NVDA"]} and "Total chunks 0" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("argv", [[], ["unknown-cmd"]])

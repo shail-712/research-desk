@@ -292,6 +292,14 @@ def priority(section: str) -> int:
     return 6
 
 
+def order_key(row: dict, focus: list[str] | None = None) -> tuple[int, int]:
+    """Embedding order: the focus tickers' chunks first (all their sections), then everyone
+    else's; each group by section priority. `--focus NVDA` makes the demo company complete
+    before the others' risk factors when the day's quota may not cover everything."""
+    focused = {t.upper() for t in focus or []}
+    return (0 if row["ticker"] in focused else 1, priority(row["section"]))
+
+
 def chunk_hash(f: Filing, section: str, text: str) -> str:
     return hashlib.sha256(f"{f.accession}|{section}|{text}".encode("utf-8")).hexdigest()
 
@@ -366,7 +374,8 @@ def resolve_tickers(symbols: list[str]) -> list[tickers.Company]:
     return out
 
 
-def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, sleep=time.sleep) -> dict:
+def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, sleep=time.sleep,
+           focus: list[str] | None = None) -> dict:
     """Indexes the latest filings of each ticker. Returns stats (also printed by the CLI)."""
     index = index or vectors.LocalIndex(config.INDEX_DIR)
     service = service or embeddings.get_service()
@@ -388,7 +397,7 @@ def ingest(symbols: list[str], dry_run: bool = False, index=None, service=None, 
     if dry_run or not todo:
         return stats
 
-    todo.sort(key=lambda r: priority(r["section"]))  # stable: keeps ticker and chunk order within a rank
+    todo.sort(key=lambda r: order_key(r, focus))  # stable: keeps ticker and chunk order within a rank
 
     first = True
     for batch in batches(todo):
@@ -448,9 +457,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Index the latest SEC filings of some tickers.")
     parser.add_argument("tickers", nargs="+")
     parser.add_argument("--dry-run", action="store_true", help="show filings, sections and cost; embed nothing")
+    parser.add_argument("--focus", nargs="*", default=None, help="embed these tickers' chunks first (e.g. NVDA)")
     args = parser.parse_args(argv)
     config.setup_logging(config.env("LOG_LEVEL", "WARNING"))
-    stats = ingest(args.tickers, dry_run=args.dry_run)
+    stats = ingest(args.tickers, dry_run=args.dry_run, focus=args.focus)
     print_report(stats, args.dry_run)
     return 1 if stats["stopped"] else 0
 

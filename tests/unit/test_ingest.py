@@ -212,3 +212,28 @@ def test_rows_carry_citation_metadata(fake_sec, tmp_path, no_sleep):
     row = next(r for r in idx.load().meta if r["form"] == "10-Q")
     assert row["url"].endswith("/q.htm") and row["period"] == "2026-07-26" and row["filed"] == "2026-08-26"
     assert row["section"] == "Part I, Item 2. MD&A" and row["source"].startswith("NVDA 10-Q (period 2026-07-26)")
+
+
+def test_focus_ticker_goes_first_then_others_by_section():
+    rows = [{"ticker": t, "section": s} for t, s in [
+        ("AMD", "Part II, Item 1A. Risk Factors"), ("INTC", "Item 1A. Risk Factors"), ("AMD", "Item 7. MD&A"),
+        ("NVDA", "Part II, Item 1A. Risk Factors"), ("INTC", "Item 7. MD&A"), ("NVDA", "Item 1A. Risk Factors"),
+        ("NVDA", "Item 7. MD&A")]]
+    ordered = [(r["ticker"], r["section"]) for r in sorted(rows, key=lambda r: ingest.order_key(r, ["nvda"]))]
+    assert ordered == [
+        ("NVDA", "Item 7. MD&A"), ("NVDA", "Item 1A. Risk Factors"), ("NVDA", "Part II, Item 1A. Risk Factors"),
+        ("AMD", "Item 7. MD&A"), ("INTC", "Item 7. MD&A"),                      # others' MD&A ...
+        ("INTC", "Item 1A. Risk Factors"), ("AMD", "Part II, Item 1A. Risk Factors")]  # ... before their risk factors
+    # Without focus, the section order alone applies.
+    assert ingest.order_key(rows[0]) == (1, 5) and ingest.order_key(rows[6]) == (1, 3)
+
+
+def test_focus_is_applied_by_ingest(fake_sec, tmp_path, monkeypatch, no_sleep):
+    """Two tickers, a cap that covers only part: the focus ticker's chunks are the ones indexed."""
+    monkeypatch.setattr(ingest, "FILING_EMBED_DAILY_CAP", 5)
+    monkeypatch.setattr(ingest, "EMBED_TOKENS_PER_BATCH", 300)
+    monkeypatch.setattr(ingest, "resolve_tickers", lambda symbols: [
+        SimpleNamespace(ticker=s, cik=1045810 if s == "NVDA" else 2488, name=s) for s in symbols])
+    idx = vectors.LocalIndex(tmp_path / "idx")
+    ingest.ingest(["AMD", "NVDA"], index=idx, service=_service(tmp_path), sleep=no_sleep[1], focus=["NVDA"])
+    assert {r["ticker"] for r in idx.load().meta} == {"NVDA"}
