@@ -120,3 +120,13 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
 - **Why:** the quota was already spent and same-day numbers are more comparable than the 11-03 run (D9).
 - **Trade-off:** a v2 local eval on a later day still differs by one or more days of live data. The report states the gap.
 
+
+## D15. The ECR repository is its own small stack (2026-11-07)
+- **Options:** the repository in `template.yaml` (PLAN B.2); create it by hand and import it into the stack;
+  SAM's managed repository (`--resolve-image-repos`) with the lifecycle set by a script; a separate stack.
+- **Decision:** `infra/ecr.yaml` (stack `research-desk-ecr`) holds the repository and its keep-2 lifecycle policy,
+  deployed once before the first `sam deploy`; the main stack takes its URI via `--image-repository`.
+- **Why:** SAM pushes the image before CloudFormation creates the main stack's resources, so a repository in
+  `template.yaml` doesn't exist when the first push happens. A separate stack keeps it as IaC with nothing to import.
+- **Trade-off:** two stacks to deploy (and delete) instead of one; bends PLAN's "infra only in template.yaml".
+  Approved by the user on 2026-11-07.

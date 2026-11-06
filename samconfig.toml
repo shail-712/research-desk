@@ -1,0 +1,17 @@
+# sam build / sam deploy defaults. Account-specific values are passed on the command line, not
+# committed: --image-repository <ImageRepositoryUri of the research-desk-ecr stack> and
+# --parameter-overrides AlertEmail=<email>. See docs/PROGRESS.md (B.5) for the exact commands.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "research-desk"
+region = "ap-south-1"
+
+[default.build.parameters]
+cached = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+fail_on_empty_changeset = false

@@ -91,13 +91,20 @@ def test_dynamodb_stays_on_the_free_tier_and_matches_the_code(template):
     assert table["StreamSpecification"]["StreamViewType"] == TABLE_DEFINITION["StreamSpecification"]["StreamViewType"]
 
 
-def test_own_ecr_repository_keeps_two_images(template):
-    repos = _resources(template, "AWS::ECR::Repository")
+def test_own_ecr_repository_keeps_two_images():
+    """D15: the repo is its own stack (infra/ecr.yaml), deployed before the first `sam deploy`."""
+    ecr = yaml.load((ROOT / "infra" / "ecr.yaml").read_text(encoding="utf-8"), Loader=_CfnLoader)
+    repos = {k: v for k, v in ecr["Resources"].items() if v["Type"] == "AWS::ECR::Repository"}
     assert len(repos) == 1
     policy = json.loads(next(iter(repos.values()))["Properties"]["LifecyclePolicy"]["LifecyclePolicyText"])
     selection = policy["rules"][0]["selection"]
     assert selection == {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 2}
     assert policy["rules"][0]["action"] == {"type": "expire"}
+    assert "ImageRepositoryUri" in ecr["Outputs"]
+
+
+def test_main_stack_does_not_also_create_the_repository(template):
+    assert not _resources(template, "AWS::ECR::Repository")
 
 
 def test_every_function_has_a_14_day_log_group(template):
