@@ -1,0 +1,572 @@
+{
+  "info": {
+    "name": "Research Desk API",
+    "description": "Every route in docs/SPEC.md §5. Set the collection variables base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE), then run the collection in order: each Poll request repeats every 3 s until its job is done (up to 40 polls).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health (no access code)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"ok is true\", () => pm.expect(pm.response.json()).to.eql({ok: true}));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "No access code -> 401",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"401 JSON error\", () => { pm.response.to.have.status(401); pm.expect(pm.response.json().error).to.be.a(\"string\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get watchlist",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"rows\", () => pm.expect(pm.response.json().watchlist).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Add to watchlist (by name)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Apple\",\n  \"pct_move\": 2.5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+              "pm.test(\"resolved to AAPL\", () => pm.expect(pm.response.json().added.ticker).to.eql(\"AAPL\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Quotes for the watchlist",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/quotes",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "quotes"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"each quote has a source or an error\", () => Object.values(pm.response.json().quotes).forEach(q => pm.expect(q.source || q.error).to.be.ok));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "News for NVDA",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/news/NVDA",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "news",
+            "NVDA"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"articles\", () => pm.expect(pm.response.json().articles).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert feed",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/feed",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "feed"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"events\", () => pm.expect(pm.response.json().events).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ask (Quick)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What is AMD's market cap and P/E ratio, and what are the latest headlines?\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"quick_job\", job.job_id);",
+              "pm.collectionVariables.set(\"polls\", 0);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Poll Quick answer",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask/{{quick_job}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask",
+            "{{quick_job}}"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const polls = Number(pm.collectionVariables.get(\"polls\") || 0);",
+              "if (body.status === \"pending\" && polls < 40) {",
+              "  pm.collectionVariables.set(\"polls\", polls + 1);",
+              "  setTimeout(() => {}, 3000);",
+              "  postman.setNextRequest(pm.info.requestName);",
+              "} else {",
+              "  pm.collectionVariables.set(\"polls\", 0);",
+              "  pm.test(\"job is done\", () => pm.expect(body.status).to.eql(\"done\"));",
+              "  pm.test(\"answer cites sources\", () => {",
+              "    pm.expect(body.answer).to.be.a(\"string\").and.not.empty;",
+              "    pm.expect(body.sources).to.be.an(\"array\").that.is.not.empty;",
+              "  });",
+              "  pm.test(\"no context unless include_context\", () => pm.expect(body).to.not.have.property(\"context\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ask (Deep, the brief's query)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"How did NVIDIA perform in its latest quarter (Q3), and how does that compare with AMD and Intel's growth? What share of NVIDIA's revenue comes from its largest GPU customers, what competitive threats does it face, and what are the current market sentiment and main risks?\",\n  \"mode\": \"deep\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"deep_job\", job.job_id);",
+              "pm.collectionVariables.set(\"polls\", 0);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Poll Deep answer",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask/{{deep_job}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask",
+            "{{deep_job}}"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const polls = Number(pm.collectionVariables.get(\"polls\") || 0);",
+              "if (body.status === \"pending\" && polls < 40) {",
+              "  pm.collectionVariables.set(\"polls\", polls + 1);",
+              "  setTimeout(() => {}, 3000);",
+              "  postman.setNextRequest(pm.info.requestName);",
+              "} else {",
+              "  pm.collectionVariables.set(\"polls\", 0);",
+              "  pm.test(\"job is done\", () => pm.expect(body.status).to.eql(\"done\"));",
+              "  pm.test(\"answer cites sources\", () => {",
+              "    pm.expect(body.answer).to.be.a(\"string\").and.not.empty;",
+              "    pm.expect(body.sources).to.be.an(\"array\").that.is.not.empty;",
+              "  });",
+              "  pm.test(\"no context unless include_context\", () => pm.expect(body).to.not.have.property(\"context\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bad request -> 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"\",\n  \"mode\": \"deep\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 JSON error\", () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a(\"string\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Remove from watchlist",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist/AAPL",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist",
+            "AAPL"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"removed AAPL\", () => pm.expect(pm.response.json().removed).to.eql(\"AAPL\"));"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://REPLACE.execute-api.ap-south-1.amazonaws.com"
+    },
+    {
+      "key": "access_code",
+      "value": ""
+    },
+    {
+      "key": "quick_job",
+      "value": ""
+    },
+    {
+      "key": "deep_job",
+      "value": ""
+    },
+    {
+      "key": "polls",
+      "value": "0"
+    }
+  ]
+}
