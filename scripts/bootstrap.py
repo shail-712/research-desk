@@ -1,6 +1,8 @@
 """
-Setup after `sam deploy` (run from the project root; uses no Gemini quota):
+Setup around `sam deploy` (run from the project root; uses no Gemini quota):
 
+    python -m scripts.bootstrap --skip index watchlist   # BEFORE the first deploy: secrets only, no stack needed
+    python -m scripts.bootstrap --skip secrets           # after the deploy: index + watchlist
     python -m scripts.bootstrap                      # secrets + index (create-only) + watchlist
     python -m scripts.bootstrap --replace            # replace the S3 index after `cli.py ingest`
     python -m scripts.bootstrap --overwrite-secrets  # after changing a value in .env
@@ -14,7 +16,9 @@ Setup after `sam deploy` (run from the project root; uses no Gemini quota):
    index built with another embedding model (D11). No embedding calls: the index is uploaded as built.
 3. Watchlist: NVDA, AMD, INTC, only if the table is empty.
 
-Table and bucket names come from the stack outputs. Adapted from v1 scripts/aws_bootstrap.py
+Table and bucket names come from the stack outputs, read only when the index or watchlist step runs.
+Secrets go first because each Lambda container reads SSM once at cold start: a container started
+before the secrets exist keeps answering 503 until it is recycled. Adapted from v1 scripts/aws_bootstrap.py
 (73b6fda): v2 secret names (+ FINNHUB_API_KEY), the v2 .npz index with ETag replace; the
 embedding-cache push/pull is cut (D13).
 """
@@ -109,11 +113,14 @@ def main(argv=None) -> int:
     import boto3
 
     session = boto3.Session(region_name=args.region)
-    outputs = stack_outputs(session.client("cloudformation"), args.stack_name)
-    print(f"Stack {args.stack_name}: API {outputs.get('ApiUrl')}")
+    print(f"Region {args.region}, SSM path {args.ssm_path}")
     if "secrets" not in args.skip:
         for name, status in put_secrets(session.client("ssm"), args.ssm_path, args.overwrite_secrets).items():
             print(f"  secret {name}: {status}")
+    if {"index", "watchlist"} <= set(args.skip):
+        return 0
+    outputs = stack_outputs(session.client("cloudformation"), args.stack_name)
+    print(f"Stack {args.stack_name}: API {outputs.get('ApiUrl')}")
     if "index" not in args.skip:
         print("  index:", upload_index(session.client("s3"), outputs["DataBucketName"], args.replace))
     if "watchlist" not in args.skip:
