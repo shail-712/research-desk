@@ -11,6 +11,9 @@ Written by the Builder. One row per task; newest phase first.
 - Added the hand-off rule to the AGENT.md Builder prompt (your 11-07 instruction).
 - Proved by: `grep -rln ap-south-1` → only archive, DECISIONS, ITERATIONS, PROGRESS, tests; `python -m pytest` exit 0;
   `sam validate --lint` → valid. Nothing was written to AWS.
+- Repo cleanup (your approval, 11-07): removed `docs/reviews/.gitkeep` and the local-only `__pycache__/`,
+  `.pytest_cache/`, `data/raw/` (v1 PDFs, unused by v2) and `.aws-sam/` (stale build). README: dropped the
+  `data/raw/` note, added a Repo map. No code was dead (every module has an importer). pytest exit 0; lint valid.
 
 ## Phase B — AWS code, price alerts + Telegram (branch `phase-B-aws` from `phase-1-core`; started 2026-11-05)
 
