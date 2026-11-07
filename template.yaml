@@ -22,9 +22,17 @@ Parameters:
   BudgetLimitUsd:
     Type: Number
     Default: 1
+  EnableWatchdog:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      "true" adds the price-alert path (scan, notify, Scheduler, Stream mapping, DLQ + alarm).
+      I1 deploys with "false"; I3 turns it on (docs/ITERATIONS.md).
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  WatchdogEnabled: !Equals [!Ref EnableWatchdog, "true"]
 
 Globals:
   Function:
@@ -138,8 +146,11 @@ Resources:
     Metadata: *image
 
   # ── Price alerts: Scheduler -> scan -> DynamoDB -> Stream -> notify -> Telegram ──
+  # Only with EnableWatchdog=true. SAM copies a function's Condition to the resources it generates
+  # (the Scheduler schedule, the Stream event-source mapping, roles).
   ScanFunction:
     Type: AWS::Serverless::Function
+    Condition: WatchdogEnabled
     Properties:
       PackageType: Image
       ImageConfig: {Command: ["aws_lambda.scan.handler"]}
@@ -161,6 +172,7 @@ Resources:
 
   NotifyFunction:
     Type: AWS::Serverless::Function
+    Condition: WatchdogEnabled
     Properties:
       PackageType: Image
       ImageConfig: {Command: ["aws_lambda.notify.handler"]}
@@ -191,6 +203,7 @@ Resources:
 
   NotifyDLQ:
     Type: AWS::SQS::Queue
+    Condition: WatchdogEnabled
     Properties:
       MessageRetentionPeriod: 1209600   # 14 days to inspect failed alerts
       SqsManagedSseEnabled: true
@@ -206,6 +219,7 @@ Resources:
 
   FailedAlertsAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: WatchdogEnabled
     Properties:
       AlarmDescription: Alerts that Telegram rejected after all retries are waiting in the DLQ.
       Namespace: AWS/SQS
@@ -228,9 +242,11 @@ Resources:
     Properties: {LogGroupName: !Sub "/aws/lambda/${AskWorkerFunction}", RetentionInDays: 14}
   ScanLogs:
     Type: AWS::Logs::LogGroup
+    Condition: WatchdogEnabled
     Properties: {LogGroupName: !Sub "/aws/lambda/${ScanFunction}", RetentionInDays: 14}
   NotifyLogs:
     Type: AWS::Logs::LogGroup
+    Condition: WatchdogEnabled
     Properties: {LogGroupName: !Sub "/aws/lambda/${NotifyFunction}", RetentionInDays: 14}
 
   # ── Cost guard ──────────────────────────────────────────────────────────────
@@ -258,7 +274,9 @@ Outputs:
   DataBucketName:
     Value: !Ref DataBucket
   ScanFunctionName:
+    Condition: WatchdogEnabled
     Description: 'For the replay demo: aws lambda invoke with {"replay": "INTC:-7.5"}'
     Value: !Ref ScanFunction
   NotifyDLQUrl:
+    Condition: WatchdogEnabled
     Value: !Ref NotifyDLQ
