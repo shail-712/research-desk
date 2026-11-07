@@ -2,6 +2,20 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
+- Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
+  `https://7c2tczydl3.execute-api.ap-southeast-2.amazonaws.com`, bucket `research-desk-databucket-dddxpuze63yn`,
+  table `research-desk-Table-PPKATV744XD2`. SNS budget-alert subscription confirmed. The six secrets are in SSM under `/research-desk/`.
+- `python -m scripts.bootstrap --skip secrets` → `index: uploaded 934 chunks to s3://…/vectors/index.npz
+  (ETag "c5d499974602f4835d1d7ad0532b3fe3")`, `watchlist: seeded NVDA, AMD, INTC`.
+- Checks (2026-11-07 12:15 UTC): `curl.exe -i $URL/health` → `200 {"ok": true}`; `curl.exe -i $URL/watchlist`
+  with no `x-access-code` → `401 {"error": "Missing or wrong x-access-code"}`. API Gateway's request ID is
+  echoed in `X-Request-Id`.
+- **For the cleanup docs:** `resolve_s3 = true` (`samconfig.toml`) made SAM create its own stack
+  `aws-sam-cli-managed-default` with bucket `aws-sam-cli-managed-default-samclisourcebucket-axv5i4db6gwc`.
+  It isn't part of `research-desk`. Teardown must empty that bucket and delete that stack too, as well as
+  `research-desk` (its `DataBucket` is `Retain`, so empty and delete it by hand) and the ECR stack.
+
 ## I0 — Unblock AWS (branch `iter-0`; 2026-11-07)
 - Region is `ap-southeast-2` (D17). Read-only probes: all six ITERATIONS checks plus apigatewayv2, sqs, sns,
   scheduler, logs, cloudwatch, events and iam succeed there; `ap-south-1` and `us-east-1` are AccessDenied (except
