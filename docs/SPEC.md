@@ -83,7 +83,7 @@ flowchart LR
 | Cost guard | `AWS::Budgets::Budget` $1 → email | proves ~$0 |
 | Deploy | AWS SAM + GitHub Actions with **OIDC** role (no stored keys) | IaC + secure CI |
 
-Region `ap-south-1`. Never: NAT gateway, VPC for Lambda, provisioned concurrency, Secrets Manager,
+Region `ap-southeast-2` (the only Region this account can use, see DECISIONS D17). Never: NAT gateway, VPC for Lambda, provisioned concurrency, Secrets Manager,
 CloudFront, OpenSearch, RDS, Bedrock.
 
 ---

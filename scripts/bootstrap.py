@@ -98,7 +98,7 @@ def seed_watchlist(table_name: str, region: str, resource=None) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stack-name", default="research-desk")
-    parser.add_argument("--region", default=env("AWS_REGION", "ap-south-1"))
+    parser.add_argument("--region", default=env("AWS_REGION", "ap-southeast-2"))
     parser.add_argument("--ssm-path", default="/research-desk")
     parser.add_argument("--overwrite-secrets", action="store_true", help="replace existing SSM secrets")
     parser.add_argument("--replace", action="store_true", help="replace the S3 index (If-Match on its ETag)")

@@ -139,3 +139,17 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
 - **Why:** deploys were blocked (D17 pending), `main` held only docs, and a long phase could end with nothing
   submittable. Small iterations keep a working, committed project at every step.
 - **Trade-off:** fewer reviews, so the Builder's own checks carry more weight.
+
+## D17. Region is ap-southeast-2, the only one this account can use (2026-11-07)
+- **Context:** the account was opened through AWS's "projects" sign-up. An AWS Organizations SCP limits it to one
+  Region, which blocked the B.5 deploy to `ap-south-1` (nothing was created there).
+- **Probes (read-only, 2026-11-07):** `aws account list-regions` lists 17 enabled Regions. In `ap-southeast-2`
+  all six probes succeed (`cloudformation list-stacks`, `lambda list-functions`, `ecr describe-repositories`,
+  `s3api list-buckets`, `dynamodb list-tables`, `ssm describe-parameters`), and so do the other services the stack
+  uses (`apigatewayv2`, `sqs`, `sns`, `scheduler`, `logs`, `cloudwatch`, `events`, `iam`). In `ap-south-1` and
+  `us-east-1` every regional probe is AccessDenied; only S3 ListBuckets (a global call) succeeds.
+  `lambda list-functions` is denied in all 16 other enabled Regions.
+- **Decision:** deploy to `ap-southeast-2`. It is set in `samconfig.toml`, `.env` / `.env.example`, the ECR
+  stack command, the Postman base URL and the bootstrap default. Moto tests keep `ap-south-1` (it has no effect).
+- **Trade-off:** higher network latency from India than `ap-south-1` (not measured; small next to LLM time). Gemini, SEC and market-data calls are not
+  affected. The Region can't be changed without a different account.

@@ -2,6 +2,16 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I0 — Unblock AWS (branch `iter-0`; 2026-11-07)
+- Region is `ap-southeast-2` (D17). Read-only probes: all six ITERATIONS checks plus apigatewayv2, sqs, sns,
+  scheduler, logs, cloudwatch, events and iam succeed there; `ap-south-1` and `us-east-1` are AccessDenied (except
+  global S3 ListBuckets); `lambda list-functions` is denied in all 16 other enabled Regions (`aws account list-regions`).
+- Switched in `samconfig.toml`, `.env` / `.env.example`, `template.yaml` description, `infra/ecr.yaml` command,
+  Postman base URL, `scripts/bootstrap.py` default, SPEC §3 (→ D17). AGENT.md already pointed to D17; README had no Region.
+- Added the hand-off rule to the AGENT.md Builder prompt (your 11-07 instruction).
+- Proved by: `grep -rln ap-south-1` → only archive, DECISIONS, ITERATIONS, PROGRESS, tests; `python -m pytest` exit 0;
+  `sam validate --lint` → valid. Nothing was written to AWS.
+
 ## Phase B — AWS code, price alerts + Telegram (branch `phase-B-aws` from `phase-1-core`; started 2026-11-05)
 
 Tonight's scope (your 11-05 instruction): B.1, B.2, B.3, B.6 and B.7 code + template only. Not done: B.4 index upload, B.5 / B.7 deploys, pushes. Phase A's S6 (last 45 KB chunks + filing re-run) still waits for the 11-06 quota.

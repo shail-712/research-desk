@@ -61,11 +61,32 @@ Do the next unfinished iteration in docs/ITERATIONS.md, then stop.
   commit, and `sam validate --lint` after template changes.
 - Before any deploy, show the change set and wait for my OK.
 - Blocked on something only I can do? Give me exact steps, then wait.
-- Done = every check in the iteration passes. Merge to main and add a few
-  lines to docs/PROGRESS.md (what was done, the commands that proved it).
-  Don't push unless I say so.
+- Done = every check in the iteration passes. Add a few lines to
+  docs/PROGRESS.md (what was done, the commands that proved it), then hand
+  me the merge to main (see the hand-off rule). Don't push unless I say so.
 - Tell me in 5 lines or fewer: what works now, how it was checked, and
   anything left over.
+
+## Hand-off rule: the user runs it, you prepare it
+Hand a step to me instead of doing it yourself when it is:
+- anything that writes to AWS: deploys, change-set execution,
+  bootstrap uploads, SSM writes, invokes, stack deletion
+- anything with secrets, accounts or the console (.env, keys, SSM
+  values, Telegram, Streamlit Cloud, emails)
+- git merges to main, tags and any push
+- long runs I can watch: ingest, evals, newman, sam build
+- anything quicker for me to click than for you to script
+
+For each hand-off, give me:
+1. What and why, in one line.
+2. The exact commands (PowerShell), copy-paste ready.
+3. What success looks like (expected output).
+4. What to paste back to you if it fails.
+Then STOP and wait. Continue only after I reply with the result.
+
+You still do: reading code, writing code and tests, running pytest,
+sam validate, read-only AWS probes, and editing docs. Keep
+hand-offs small: one step or a few related commands at a time.
 ```
 
 ---

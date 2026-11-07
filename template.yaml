@@ -4,7 +4,7 @@ Description: >
   Research Desk - API Gateway HTTP API + Lambda (one container image) for Quick / Deep research
   answers, DynamoDB single table (provisioned 2/2, TTL, Streams), FAISS index on S3 (Retain),
   price alerts (EventBridge Scheduler -> scan -> DynamoDB Stream -> Telegram, SQS DLQ + alarm),
-  SSM SecureString secrets, 14-day logs, $1 budget. Region ap-south-1. See docs/SPEC.md §3.
+  SSM SecureString secrets, 14-day logs, $1 budget. Region ap-southeast-2 (D17). See docs/SPEC.md §3.
   Adapted from v1 template.yaml (73b6fda): digest/SES, filing resources, X-Ray and the dashboard
   cut (D3, D13); Retain on the data bucket. The ECR repository (keep-2 lifecycle) is the
   separate stack infra/ecr.yaml, deployed first (D15).

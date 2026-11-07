@@ -3,7 +3,7 @@ Description: >
   Research Desk - the ECR repository for the Lambda image, with a lifecycle policy that keeps the
   2 newest images. A separate stack because SAM pushes the image BEFORE CloudFormation creates the
   main stack's resources, so the repository must exist first (DECISIONS D15). Deploy once:
-    aws cloudformation deploy --template-file infra/ecr.yaml --stack-name research-desk-ecr --region ap-south-1
+    aws cloudformation deploy --template-file infra/ecr.yaml --stack-name research-desk-ecr --region ap-southeast-2
 
 Parameters:
   RepositoryName:
