@@ -11,6 +11,29 @@ Written by the Builder. One row per task; newest phase first.
 - Checks (2026-11-07 12:15 UTC): `curl.exe -i $URL/health` → `200 {"ok": true}`; `curl.exe -i $URL/watchlist`
   with no `x-access-code` → `401 {"error": "Missing or wrong x-access-code"}`. API Gateway's request ID is
   echoed in `X-Request-Id`.
+- `newman` (npx cache, 6.2.3) on the I1 requests only (health, 401, watchlist get/add/remove, quotes, news NVDA,
+  Quick ask + poll, 400); Deep and Feed left out: **20 requests, 30/30 assertions, 0 failed, 49 s**. The Quick
+  poll ran ~10 extra times (~30 s). Also covers the "Quick `/ask` returns `done` with sources" check.
+- No scan/notify resources: `describe-stack-resources` lists 14 (Api/AskWorker functions + roles + logs,
+  Table, DataBucket, HttpApi + stage, AlarmTopic, MonthlyBudget).
+- **Cold-start baseline for I2** (job `bb7ecd65…`, 12:22 UTC; job item + CloudWatch, read-only). Question: "What is
+  AMD's market cap and P/E ratio, and what are the latest headlines?" → tools `market`, `news`; 6 sources (yfinance
+  quote, session 2026-11-06, + 5 headlines), every number cited `[Doc 1]`.
+  | Step | Time |
+  |---|---|
+  | ApiFunction cold init (512 MB) | 2.7 s (`/health`, first call) |
+  | `POST /ask` → 202 | 12:22:32.2 |
+  | AskWorker init, try 1 (1024 MB image) | **timed out at 10.0 s** (`INIT_REPORT … Status: timeout`) |
+  | AskWorker init, try 2 (inside the invoke) | ~3.7 s (SSM secrets loaded again, then START 12:22:46.3) |
+  | Tools (parallel) | market:AMD 4.28 s (yfinance 3.30 s), news:AMD 1.46 s |
+  | Gemini (`gemini-3.5-flash-lite`, 1032 tokens) | 12.78 s (llm 12.98 s) |
+  | Answer total / `llm_calls` | 17.46 s / 1 |
+  | Worker REPORT | Duration 21.25 s (incl. init try 2), max memory 276 MB |
+  | 202 → `done` (finished 12:23:03.8) | **~31.5 s** |
+  The first init timeout is Lambda's 10 s init limit: the first start of a new image is slow, and Lambda then
+  re-runs init inside the invoke (that time counts against the 120 s timeout). It still answered, but it added
+  ~10 s. For I2: measure a second cold start, and a warm run, before deciding whether imports need to be lazier.
+  Gemini at ~13 s for one short answer is the biggest share.
 - **For the cleanup docs:** `resolve_s3 = true` (`samconfig.toml`) made SAM create its own stack
   `aws-sam-cli-managed-default` with bucket `aws-sam-cli-managed-default-samclisourcebucket-axv5i4db6gwc`.
   It isn't part of `research-desk`. Teardown must empty that bucket and delete that stack too, as well as
