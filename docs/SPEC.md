@@ -1,5 +1,7 @@
 # SPEC — Research Desk (v2, clean rebuild)
 
+> **Scope reduced 2026-11-05 — DECISIONS D13/D14 and PLAN rev 3 take precedence.**
+
 > The single description of what to build. Written 2026-11-04 from the first version
 > (`../investment-research-assistant`, read-only reference), which worked locally but grew through
 > five plan changes. v2 builds the **final** design directly. Brief: [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -28,17 +30,17 @@ defined in AWS SAM and deployed by GitHub Actions."*
 | F1 | **Market data tool**: quote for any US ticker (price, prev close, day %, volume, market cap, P/E). yfinance primary, **Finnhub fallback** on error/block/empty. Each quote carries `source`. | Quote for NVDA with yfinance mocked to fail comes from Finnhub; QQQ and SPY quotes work on the free Finnhub key. |
 | F2 | **News tool**: Yahoo Finance RSS per ticker, kept only if the headline names the ticker/company; fall back to top stories. | `cli news NVDA` returns dated, linked headlines. |
 | F3 | **Ticker resolution**: "advanced micro devices", "Apple", `MSFT` → ticker + CIK via SEC `company_tickers.json` (cached). | Unknown names give a friendly "not found". |
-| F4 | **Knowledge base (RAG)**: FAISS over SEC filings (10-K, 10-Q, earnings 8-K) for NVDA, AMD, INTC at start (3–5 companies). Gemini `gemini-embedding-001`, 768 dims, L2-normalised; ~300-token chunks, 50 overlap; metadata `ticker, form, filed, url, section`. Balanced retrieval: over-fetch 50, keep ≤3 chunks per company. | "Compare NVIDIA and AMD data center revenue" retrieves chunks from both. The brief's example query (GPU customers' revenue) needs **10-K customer-concentration** sections — index 10-Ks, not only press releases. |
+| F4 | **Knowledge base (RAG)**: FAISS over SEC filings (10-K, 10-Q, earnings 8-K) for NVDA, AMD, INTC at start (3–5 companies). Gemini `gemini-embedding-001`, 768 dims, L2-normalised; ~300-token chunks, 50 overlap; metadata `ticker, form, filed, url, section`. Balanced retrieval: over-fetch 50, keep ≤3 chunks per company. Index the **latest filed** filings ("NVIDIA's Q3" = latest filed quarter at demo time). **Embeddings are paid for once** (DECISIONS D11): a cache keyed by `sha256(model|dim|task_type|text)` (local SQLite `data/cache/embeddings.sqlite`, snapshot on S3), ingest skips chunks whose hash is already indexed, the index header records model + dim (mismatch → refuse to load), and deploys never embed (index lives in a Retain-policy S3 bucket, not in the image). | "Compare NVIDIA and AMD data center revenue" retrieves chunks from both. The brief's example query (GPU customers' revenue) needs **10-K customer-concentration** sections — index 10-Ks, not only press releases. Re-running ingest, or deploying again, makes 0 embedding calls. |
 | F5 | **Quick mode**: keyword routing → tools in parallel → one Gemini answer with citations. ~5 s p50. | Answers cite `[source]` for every number. |
 | F6 | **Deep mode (agentic)**: supervisor plans (JSON) → Market, News, Filings specialists run **in parallel**, each a Gemini function-calling loop over its own tools → shared **evidence board** (E1, E2…) → one follow-up round if gaps → supervisor writes citing `[E#]` → **fact-checker**. | The brief's NVIDIA/AMD/Intel query is answered with all three specialists and citations. |
 | F7 | **Fact-checker**: code matches every number in the answer to evidence (units, "(in millions)", rounding); only unmatched numbers go to one LLM call ("derived" vs "unsupported"); unsupported → marked ⚠️unverified. | A planted fake number is flagged; derived growth % is accepted. |
-| F8 | **Price alerts**: per ticker `pct_move` (default ±3%), optional `price_above` / `price_below`. Once per rule per day. | Replaying a −7.5% move creates exactly one alert even if the scan runs twice. |
+| F8 | **Price alerts**: per ticker `pct_move` (default ±3%), optional `price_above` / `price_below`. Once per rule per day. **If there is no trading data for today** (the quote's trading date isn't today's New York date — e.g. a market holiday), price rules are skipped, never guessed (D12). | Replaying a −7.5% move creates exactly one alert even if the scan runs twice; a stale/holiday quote creates none. |
 | F9 | **"Why did it move"** on each price alert, cheapest-and-certain first: (1) code: if QQQ or SPY moved ≥1.5% the same way and the stock ≤1.5× that → "moved with the market"; (2) code: headlines from the **session window** (previous close → this close, 4 pm New York) naming the company; (3) LLM may only *pick* one of those headlines; else "no clear catalyst found". Never guesses. | An after-hours headline explains the *next* session, not this one (a real bug in v1). |
 | F10 | **SEC filing alerts + earnings snapshot**: new 10-K/10-Q/8-K from `data.sec.gov/submissions/CIK##########.json`; for 10-Q/10-K, revenue, diluted EPS, net income vs last quarter and last year from XBRL `companyfacts` (**code does the math**). Earnings 8-K press releases aren't XBRL-tagged: LLM extracts current figures, kept only if the number appears verbatim in the quoted line; comparison quarters from XBRL. Other 8-Ks: 3-sentence summary. | NVDA's latest 10-Q produces a snapshot whose numbers match EDGAR. |
-| F11 | **Knowledge base follows the watchlist**: adding a ticker queues its latest 10-K, 10-Q and earnings 8-K for indexing; new filings are indexed by the scan. Daily embedding cap `FILING_EMBED_DAILY_CAP=400` (Gemini embed free tier ≈1,000 requests/day); overflow continues next run. | Add MSFT → next scan indexes its filings; Deep mode answers a filing question about it. |
+| F11 | **Knowledge base follows the watchlist**: adding a ticker queues its latest 10-K, 10-Q and earnings 8-K for indexing; new filings are indexed by the scan, through the embedding cache (already-indexed chunks are never re-embedded). Daily embedding cap `FILING_EMBED_DAILY_CAP=400` (Gemini embed free tier ≈1,000 requests/day); overflow continues next run. | Add MSFT → next scan indexes its filings; Deep mode answers a filing question about it. |
 | F12 | **Telegram delivery** of alerts via DynamoDB Stream → notifier Lambda; failures after retries → SQS DLQ + alarm. | Alert reaches the phone; a forced Telegram failure lands in the DLQ and fires the alarm. |
 | F13 | **API** (API Gateway HTTP API → Lambda) + **Streamlit** frontend (Community Cloud, calls the API only) + **Postman collection**. | All routes in §5 work from Postman against the deployed URL. |
-| F14 | **Eval harness**: 20 questions (`evals/questions.json`, reuse v1's), both modes, metrics computed by code (§9). | `python -m evals.run` writes `docs/EVAL.md`. |
+| F14 | **Eval harness**: 20 questions (`evals/questions.json`, reuse v1's), both modes, metrics computed by code (§9). | `python -m evals.run --target local\|api` writes `docs/eval/v2-results.md` (Local / Deployed sections); the v1 baseline is `docs/eval/v1-baseline.md`. Scoring is v1's, ported verbatim and frozen (D8). |
 
 **Not in scope:** weekly email digest, Supabase/pgvector/GitHub-cron alternative backend, user accounts,
 portfolio tracking, insider (Form 4) parsing, guidance/risk-factor diffs, Bedrock.
@@ -55,7 +57,7 @@ flowchart LR
     API -->|"async invoke"| ASK["AskWorkerFunction<br/>Quick / Deep"]
     API <--> DDB[("DynamoDB single table<br/>provisioned 2/2, TTL, Streams")]
     ASK --> DDB
-    ASK --> S3[("S3: FAISS index + metadata<br/>/tmp warm cache, ETag check")]
+    ASK --> S3[("S3: FAISS index + metadata<br/>in-memory warm copy per container, ETag check")]
     EB["EventBridge Scheduler<br/>every 15 min, US market hours"] --> SCAN["ScanFunction<br/>prices, filings, indexing"]
     SCAN -->|"TransactWriteItems dedupe"| DDB
     SCAN -->|"append, If-Match"| S3
@@ -74,14 +76,14 @@ flowchart LR
 | Long answers | `POST /ask` → 202 + job id; worker Lambda; `GET /ask/{id}` | API Gateway's 30 s limit < Deep mode's 20–75 s |
 | Schedule | EventBridge Scheduler, cron every 15 min Mon–Fri 9:30–16:00 New York | on time, no servers |
 | Data | DynamoDB single table, **PROVISIONED 2/2** (always free; on-demand isn't), TTL, Streams | atomic dedupe via transactions |
-| Vectors | FAISS on S3 (~5–10 MB), `/tmp` cache re-checked by ETag; writes use S3 conditional writes (`If-Match`) and retry on conflict | no OpenSearch cost |
+| Vectors | FAISS on S3 (~5–10 MB), in-memory warm copy per Lambda container, re-checked by ETag; writes use S3 conditional writes (`If-Match`) and retry on conflict | no OpenSearch cost |
 | Secrets | SSM Parameter Store SecureString, read once per cold start | free; Secrets Manager isn't |
 | Images | **own `AWS::ECR::Repository`** in the template with a lifecycle policy keeping 2 images | SAM's auto-created repo can't take a lifecycle policy |
 | Observability | CloudWatch logs (14 d), EMF metrics, alarms → SNS email, 1 dashboard, X-Ray | free-tier |
 | Cost guard | `AWS::Budgets::Budget` $1 → email | proves ~$0 |
 | Deploy | AWS SAM + GitHub Actions with **OIDC** role (no stored keys) | IaC + secure CI |
 
-Region `ap-south-1`. Never: NAT gateway, VPC for Lambda, provisioned concurrency, Secrets Manager,
+Region `ap-southeast-2` (the only Region this account can use, see DECISIONS D17). Never: NAT gateway, VPC for Lambda, provisioned concurrency, Secrets Manager,
 CloudFront, OpenSearch, RDS, Bedrock.
 
 ---
@@ -115,8 +117,8 @@ the code isn't configured. JSON errors: `{"error": "<safe message>"}`, never sta
 | GET | `/quotes` | quotes for the watchlist (one batched call), each with `source` |
 | GET | `/news/{ticker}` | headlines |
 | GET | `/feed` | latest 20 alerts/filings |
-| POST | `/ask` | `{"question", "mode": "quick" \| "deep"}` → `202 {"job_id", "poll"}` |
-| GET | `/ask/{job_id}` | `{"status": "pending" \| "done" \| "error", "answer", "sources", "trace", "timings"}` |
+| POST | `/ask` | `{"question", "mode": "quick" \| "deep", "include_context"?: false}` → `202 {"job_id", "poll"}`. `include_context` is **off by default and used only by the eval runner** (D10). |
+| GET | `/ask/{job_id}` | `{"status": "pending" \| "done" \| "error", "answer", "sources", "trace", "timings"}`, plus `"context"` (evidence text, capped at 100 KB, `context_truncated` flag) only when the job was created with `include_context: true` |
 
 Ticker path params: `^[A-Za-z.\-]{1,10}$`. Question length capped (e.g. 1,000 chars).
 
@@ -174,16 +176,18 @@ core/
   agents/               supervisor, specialists, loop, tools, evidence, checker
   alerts.py explain.py filings.py telegram.py
   store.py (local SQLite) store_dynamo.py
-  logging.py            JSON logs + request id
+  log.py                JSON logs + request id (not `logging.py`: it would shadow the stdlib module)
 aws_lambda/             runtime.py (SSM, EMF), api.py, ask_worker.py, scan.py, notify.py
 jobs/scan.py            the scan, runnable locally
-scripts/bootstrap.py    SSM secrets + initial index upload + seed watchlist
-evals/                  questions.json, run.py → docs/EVAL.md
+scripts/bootstrap.py    SSM secrets + create-only index upload + embedding-cache push/pull + seed watchlist
+scripts/download_raw.py fetches v1's three 10-Q PDFs into data/raw/ (manifest data/raw_manifest.json, sha256-checked; not committed)
+evals/                  questions.json, scoring.py (frozen, from v1), run.py → docs/eval/v2-results.md
 tests/unit/             mocks + moto only
 postman/                Research-Desk.postman_collection.json
 template.yaml  Dockerfile  samconfig.toml
 .github/workflows/      ci.yml (pytest), deploy.yml (OIDC → sam build/deploy on main)
-docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, AWS_SETUP, DESIGN (1–2 pages), EVAL
+docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, AWS_SETUP, DESIGN (1–2 pages),
+                        eval/ (v1-baseline.md, v2-results.md)
 ```
 
 ---
@@ -197,7 +201,7 @@ docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, A
   - right companies found; right tools/agents used
   - lines with numbers that carry a citation
   - latency p50/p90; Gemini calls per question; fallbacks
-- v1 baseline to beat or match: routing 75% → 95%, cited lines 51% → 90%, untraceable numbers 1/109 → 0/98, latency p50 4.7 s (Quick) / 23.4 s (Deep).
+- v1 baseline to beat or match: routing 75% → 95%, cited lines 51% → 90%, untraceable numbers 1/109 → 0/98, latency p50 4.7 s (Quick) / 23.4 s (Deep) — from v1's saved 2026-11-03 run; re-run on 2026-11-04 with v1's own config in `docs/eval/v1-baseline.md`. Note v1's KB was three older 10-Q PDFs (no 10-K), so filing-question differences are partly the corpus (D9).
 
 ---
 
@@ -208,7 +212,8 @@ docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, A
 | `gemini-2.5-flash-lite` → 404 for new keys | default to `gemini-3.5-flash-lite`; check model names on day 1 |
 | Gemini calls took 7–40 s under load; the SDK can hang for minutes | per-call HTTP timeout + total budget + model cooldown |
 | Gemini free tier: embeddings ~1,000 requests/day (each text in a batch counts), 30k tokens/min | daily embed cap, batch by tokens, log usage |
-| Mixing embedding models (old `text-embedding-004` index + new query model) silently breaks retrieval | one embedding service for both sides; rebuild the index if the model changes |
+| Mixing embedding models (old `text-embedding-004` index + new query model) silently breaks retrieval | one embedding service for both sides; model + dim in the cache key and index header; rebuild the index if the model changes |
+| Embedding quota spent twice (rebuilds, redeploys) | embedding cache (disk + S3 snapshot); skip already-indexed chunk hashes; index not in the image; S3 bucket Retain |
 | SEC returns 403 without a `User-Agent` containing a contact email; max 10 req/s | `SEC_USER_AGENT` env var; global throttle |
 | Yahoo often blocks/rate-limits AWS IPs | Finnhub fallback; record `source` |
 | Finnhub free tier has **no historical candles**; Alpha Vantage free ≈25 requests/day (too few) | use Finnhub only for current quotes (day % change is in the quote) |
@@ -216,6 +221,7 @@ docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, A
 | API Gateway 30 s integration limit | async job pattern for `/ask` |
 | DynamoDB on-demand is not in the always-free tier | PROVISIONED 2/2 |
 | An after-hours headline explains the next session | session window in New York time |
+| **Known gap:** no market-holiday calendar | no trading data for today → skip price alerts; the day after a holiday the session window may start at the wrong close (D12) |
 | Earnings 8-K press releases aren't XBRL-tagged | extract with LLM, keep only verbatim-quoted numbers |
 | "Compare A and B" retrieval returned only A | over-fetch + per-company cap |
 | Windows: Unicode output crashes scripts | `$env:PYTHONIOENCODING="utf-8"` |
@@ -238,4 +244,4 @@ docs/                   ASSESSMENT, SPEC, DECISIONS, PLAN, PROGRESS, reviews/, A
 Tech line: Python, AWS Lambda, API Gateway, DynamoDB, EventBridge, S3, SQS, CloudWatch, X-Ray, AWS SAM,
 Docker/ECR, Gemini, FAISS, GitHub Actions.
 To measure on the deployed stack: Deep/Quick p50 and p90, alert latency (scan → Telegram), cold start,
-`/tmp` index cache hit rate, cost/month after 48 h, eval scores.
+warm index cache hit rate, cost/month after 48 h, eval scores.

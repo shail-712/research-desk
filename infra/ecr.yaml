@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Research Desk - the ECR repository for the Lambda image, with a lifecycle policy that keeps the
+  2 newest images. A separate stack because SAM pushes the image BEFORE CloudFormation creates the
+  main stack's resources, so the repository must exist first (DECISIONS D15). Deploy once:
+    aws cloudformation deploy --template-file infra/ecr.yaml --stack-name research-desk-ecr --region ap-southeast-2
+
+Parameters:
+  RepositoryName:
+    Type: String
+    Default: research-desk
+    AllowedPattern: '^[a-z0-9][a-z0-9._/-]*$'
+
+Resources:
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      ImageScanningConfiguration: {ScanOnPush: false}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "Keep the 2 newest images",
+                      "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 2},
+                      "action": {"type": "expire"}}]}
+
+Outputs:
+  ImageRepositoryUri:
+    Description: Pass to `sam deploy --image-repository` (samconfig.toml).
+    Value: !GetAtt ImageRepository.RepositoryUri
