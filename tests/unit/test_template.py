@@ -88,7 +88,10 @@ def test_dynamodb_stays_on_the_free_tier_and_matches_the_code(template):
     assert table["KeySchema"] == TABLE_DEFINITION["KeySchema"]
     assert table["AttributeDefinitions"] == TABLE_DEFINITION["AttributeDefinitions"]
     assert table["TimeToLiveSpecification"] == {"AttributeName": "expires_at", "Enabled": True}
-    assert table["StreamSpecification"]["StreamViewType"] == TABLE_DEFINITION["StreamSpecification"]["StreamViewType"]
+    # The stream exists only with EnableWatchdog=true (only NotifyFunction reads it).
+    on, off = table["StreamSpecification"]["!If"][1:]
+    assert table["StreamSpecification"]["!If"][0] == "WatchdogEnabled" and off == {"!Ref": "AWS::NoValue"}
+    assert on["StreamViewType"] == TABLE_DEFINITION["StreamSpecification"]["StreamViewType"]
 
 
 def test_own_ecr_repository_keeps_two_images():

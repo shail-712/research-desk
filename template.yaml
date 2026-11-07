@@ -67,7 +67,9 @@ Resources:
         - {AttributeName: pk, KeyType: HASH}
         - {AttributeName: sk, KeyType: RANGE}
       TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
-      StreamSpecification: {StreamViewType: NEW_IMAGE}
+      # Only the Watchdog's notify function reads the stream. Turning it on in I3 is an in-place
+      # update (no table replacement).
+      StreamSpecification: !If [WatchdogEnabled, {StreamViewType: NEW_IMAGE}, !Ref AWS::NoValue]
 
   # The FAISS index (vectors/index.npz). It cost embedding quota to build (D11), so it outlives
   # the stack: `sam delete` leaves it, and it is deleted by hand when the project ends.
