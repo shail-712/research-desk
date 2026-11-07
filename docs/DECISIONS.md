@@ -130,3 +130,12 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
   `template.yaml` doesn't exist when the first push happens. A separate stack keeps it as IaC with nothing to import.
 - **Trade-off:** two stacks to deploy (and delete) instead of one; bends PLAN's "infra only in template.yaml".
   Approved by the user on 2026-11-07.
+
+## D16. Switched to iterative delivery (2026-11-07)
+- **Options:** keep the phased plan (PLAN rev 3, phases A–D); small iterations that each end deployed or verified.
+- **Decision:** `docs/ITERATIONS.md` (I0–I5) is the plan. Old plans are in `docs/archive/`. Every iteration ends
+  with its checks passing and a merge to `main`. Code that is already built and tested stays as it is. Reviews
+  run only after I1 and I3 and stay under 40 lines. AGENT.md is cut down to a Builder prompt and a Reviewer prompt.
+- **Why:** deploys were blocked (D17 pending), `main` held only docs, and a long phase could end with nothing
+  submittable. Small iterations keep a working, committed project at every step.
+- **Trade-off:** fewer reviews, so the Builder's own checks carry more weight.
