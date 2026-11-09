@@ -26,6 +26,24 @@ Written by the Builder. One row per task; newest phase first.
   independent searches together in one step; if the period is missing, search again for the latest results
   without naming a period. If the next local run still omits NVIDIA's latest-quarter revenue, it is accepted as
   a known limitation and we redeploy.
+- Remaining steps are in `docs/I2-RUNBOOK.md` (A–E, with the Gemini quota plan). Results go below.
+- **A. Local Deep check (round-2 prompt):** `<date>`, `<total> s`, `<calls>` calls. Latest-quarter revenue
+  finding: `<yes: quote / no: known limitation>`. "Not filed yet" gap: `<yes/no>`. Customer concentration: `<yes/no>`.
+- **B. Redeploy:** change set `<Modify ApiFunction, Modify AskWorkerFunction, Replacement False>`;
+  `UPDATE_COMPLETE` at `<time UTC>`. Pushed image `<bytes>` (ECR, compressed); local 1.27 GB.
+- **C. Cold start (first ask after the redeploy) vs warm**, question = demo query 2:
+  | | Cold | Warm |
+  |---|---|---|
+  | ApiFunction Init Duration | `<ms>` | — |
+  | AskWorker Init Duration / INIT_REPORT timeout? | `<ms / yes-no>` | — |
+  | Tools (market, news) | `<s>` | `<s>` |
+  | Gemini | `<s>` | `<s>` |
+  | 202 → done | `<s>` | `<s>` |
+  I1 baseline (new image, first ever start): AskWorker init timed out at 10 s, then ~3.7 s; 202 → done ~31.5 s.
+- **D. Brief's Deep query on AWS (after the fix):** `<status>`, `<total> s`, `<calls>` calls, fallback `<none>`,
+  checker `<x/y>`, `<n>` E# citations. Compared with check 1 (17.57 s, 10 calls): `<notes>`.
+- **E. Eval subset** (s1 c1 c4 f3 w1, both modes): `<complete / PARTIAL n of 10>`. Deployed section of
+  `docs/eval/v2-results.md`: `<headline numbers>`. Calls used: `<n>`.
 
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
