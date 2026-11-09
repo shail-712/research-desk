@@ -8,9 +8,10 @@ its source: a live quote, a news headline, or a passage from an SEC filing.
 It has two modes:
 
 - **Quick:** picks the tools the question needs, runs them in parallel, and
-  makes one Gemini call. About 6 s on AWS when warm (6.15 s, one measured
-  run, a news + filings question). A cold start adds about 2.6–2.9 s of
-  worker start-up. Median 3.0 s locally ([eval](docs/eval/v2-results.md)).
+  makes one Gemini call. On AWS: median 5.8 s from request to answer over 5
+  eval questions; a warm market + news question took ~6.6 s (4.0 s of work).
+  A cold start took ~10 s (3.8 s of worker start-up). Median 3.0 s locally.
+  See [the eval](docs/eval/v2-results.md).
 - **Deep:** a supervisor sends the question to three specialists (market,
   news, filings) in parallel. They post evidence to a shared board, and a
   fact-checker checks every number in the final answer against that evidence.

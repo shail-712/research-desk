@@ -1,11 +1,9 @@
 # I2 runbook — the remaining steps, in order
 
-> **Status 2026-11-10:**
-> - Done: 0, A (passed), B1, B4.
-> - B2's change set was deleted, not executed. It had a third row, `HttpApi` Body (Dynamic, caused by
->   `ApiFunction.Arn`), and the safety rule allowed exactly 2.
-> - Not run: B3, C, D and E. See PROGRESS I2.
-> - The image `sha256:f92da023…` is already in ECR, so re-running B1–B2 shouldn't push a new one.
+> **Status 2026-11-10: all steps done by the Builder. Results are in PROGRESS I2.**
+> - The B2 safety rule was extended (your decision): an `HttpApi` row is accepted only as Modify /
+>   Replacement False with every detail `CausingEntity` ApiFunction(.Arn) and `Evaluation: Dynamic`. That row
+>   appears whenever the API function's image changes.
 
 Written by the Builder on 2026-11-09 for you to run. Every step is a hand-off: you run it, paste the
 result back, and the Builder records it in `docs/PROGRESS.md` (I2 section, which has placeholders).

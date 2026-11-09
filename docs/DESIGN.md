@@ -32,7 +32,14 @@
   revenue was $96.2B, up 106%" with AMD's and Intel's Q3. It keeps the 16% customer-concentration figure.
   - The cost went up: 15 Gemini calls and 57 s, against 10 calls and 17.6 s before. One Gemini 503 accounts
     for 14.9 s of that.
-  - Not yet confirmed on AWS: the redeploy was held back, see PROGRESS I2 B.
+- **On AWS (2026-11-09 19:10 UTC, same image): partly.** The answer says Q3 isn't filed, names Q2 FY2027 as
+  the latest period, and keeps the 16% concentration. It took 13 calls and 15.8 s. **But it left out the
+  $96.2B / +106% revenue.** The specialist ignored "one topic per query" for NVIDIA, re-ran a mixed query, then
+  called `latest_filing`, which gave the period but not the revenue passage.
+- **Known limitation (accepted after the last prompt round).** When the asked period isn't filed, the answer
+  reliably says so, but the latest period's figures are reported only some of the time, because the model
+  follows the search rule unevenly. The production improvement below (rewriting the search in code from the
+  filing metadata) would make it deterministic.
 - **Production improvement.** Use the filing metadata (form, period, filing date) in the code: when the asked
   period is newer than the latest filed one, the code itself rewrites the search to "latest results". That
   replaces relying on the prompt.
@@ -47,6 +54,8 @@ description and the market prompt now send valuation questions straight to `get_
     Lambda then re-ran init inside the request, which still answered, about 10 s later.
   - Later cold starts of the same image took 1.4–1.6 s (API) and 2.6–2.9 s (worker), with no timeout (11-09
     logs).
+  - After the I2 redeploy (new image, 2026-11-09): API init 1.98 s, worker init 3.76 s, still no timeout.
+    So the I1 timeout was a one-off, and no fix was made.
   - Production improvements: lazier imports (pandas and yfinance only when a quote is fetched), a smaller
     image, or one warm-up call after each deploy.
 - **Gemini overload.** On the free tier, a model can return 503 or 504 under load. The fallback chain moves to
