@@ -8,8 +8,9 @@ its source: a live quote, a news headline, or a passage from an SEC filing.
 It has two modes:
 
 - **Quick:** picks the tools the question needs, runs them in parallel, and
-  makes one Gemini call. Median 3.0 s when run locally
-  ([eval](docs/eval/v2-results.md)); warm latency on AWS is measured in I2.
+  makes one Gemini call. About 6 s warm on AWS (NVDA P/E + news: market
+  3.9 s, news 1.8 s, Gemini 1.8 s; one measured run). Median 3.0 s locally
+  ([eval](docs/eval/v2-results.md)).
 - **Deep:** a supervisor sends the question to three specialists (market,
   news, filings) in parallel. They post evidence to a shared board, and a
   fact-checker checks every number in the final answer against that evidence.
