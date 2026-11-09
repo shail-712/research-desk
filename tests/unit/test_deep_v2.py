@@ -408,6 +408,10 @@ def test_filings_prompt_reports_the_latest_period_and_keeps_partial_evidence():
     assert "search again for that company's latest results without naming a period" in system
     # Searches go out together, so the extra search fits in loop.MAX_STEPS.
     assert "Send independent searches together in the same step" in system
-    # A general rule: no company, ticker or specific quarter in the prompt.
-    for word in ("NVIDIA", "NVDA", "AMD", "Intel", "INTC", "Q3", "FY2027"):
-        assert word not in system, word
+    # A general rule: no company, ticker or specific quarter in any prompt text changed in I2
+    # (review I2, finding 5: the market prompt and the get_quotes description too).
+    texts = {"filings prompt": system, "market prompt": specialists.SPECIALISTS["market"]["system"],
+             "get_quotes description": tools.DECLARATIONS["get_quotes"].description}
+    for name, text in texts.items():
+        for word in ("NVIDIA", "NVDA", "AMD", "Intel", "INTC", "Q3", "FY2027"):
+            assert word not in text, f"{word!r} in the {name}"

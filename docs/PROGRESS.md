@@ -3,7 +3,9 @@
 Written by the Builder. One row per task; newest phase first.
 
 ## I2 — Deep mode on AWS (branch `iter-2`; 2026-11-09)
-- README: warm Quick on AWS ~6 s (NVDA P/E + news: market 3.9 s, news 1.8 s, Gemini 1.8 s; your measurement).
+- README latency: the ~6 s NVDA P/E + news run (job `25cc5783`) was a **cold** worker (Init Duration 2920 ms), not
+  warm (review I2, finding 3). README now cites the one warm Quick run in the 11-09 logs: job `dff6217c`, news +
+  filings, 6.15 s.
 - **Check 1, Deep `/ask` with the brief's query (you ran it; result read from `%TEMP%\deep-brief.json`):** `done`,
   17.57 s, 10 Gemini calls, no fallback, not partial. Plan: NVDA, AMD, INTC; round 1 = filings 7.15 s (2 calls,
   4 findings, 2 gaps), news 6.91 s (2, 5, 1), market 11.45 s (3, 3, 1). No round 2 (the follow-up call returned no
@@ -26,24 +28,33 @@ Written by the Builder. One row per task; newest phase first.
   independent searches together in one step; if the period is missing, search again for the latest results
   without naming a period. If the next local run still omits NVIDIA's latest-quarter revenue, it is accepted as
   a known limitation and we redeploy.
-- Remaining steps are in `docs/I2-RUNBOOK.md` (A–E, with the Gemini quota plan). Results go below.
-- **A. Local Deep check (round-2 prompt):** `<date>`, `<total> s`, `<calls>` calls. Latest-quarter revenue
-  finding: `<yes: quote / no: known limitation>`. "Not filed yet" gap: `<yes/no>`. Customer concentration: `<yes/no>`.
-- **B. Redeploy:** change set `<Modify ApiFunction, Modify AskWorkerFunction, Replacement False>`;
-  `UPDATE_COMPLETE` at `<time UTC>`. Pushed image `<bytes>` (ECR, compressed); local 1.27 GB.
-- **C. Cold start (first ask after the redeploy) vs warm**, question = demo query 2:
-  | | Cold | Warm |
-  |---|---|---|
-  | ApiFunction Init Duration | `<ms>` | — |
-  | AskWorker Init Duration / INIT_REPORT timeout? | `<ms / yes-no>` | — |
-  | Tools (market, news) | `<s>` | `<s>` |
-  | Gemini | `<s>` | `<s>` |
-  | 202 → done | `<s>` | `<s>` |
-  I1 baseline (new image, first ever start): AskWorker init timed out at 10 s, then ~3.7 s; 202 → done ~31.5 s.
-- **D. Brief's Deep query on AWS (after the fix):** `<status>`, `<total> s`, `<calls>` calls, fallback `<none>`,
-  checker `<x/y>`, `<n>` E# citations. Compared with check 1 (17.57 s, 10 calls): `<notes>`.
-- **E. Eval subset** (s1 c1 c4 f3 w1, both modes): `<complete / PARTIAL n of 10>`. Deployed section of
-  `docs/eval/v2-results.md`: `<headline numbers>`. Calls used: `<n>`.
+- Runbook `docs/I2-RUNBOOK.md` run by the Builder on 2026-11-10 (your rule change: Builder runs AWS + Gemini steps).
+- **A. Local Deep check (round-2 prompt): PASS.** 57.44 s, 15 Gemini calls, no fallback. Filings sent its searches
+  in parallel (3× `latest_filing`, then 4× `search_filings`, one topic each). Finding: "NVDA: Revenue for the
+  second quarter of fiscal year 2027 (ended July 26, 2026) was $96.2 billion, up 106% year-over-year [E41, E42]".
+  Gap: "The requested Q3 period is not yet filed." Customer concentration (16%, Q2 FY27) kept. The answer uses all
+  three ("Q3 data is not yet filed; Q2 FY27 revenue was $96.2B, up 106% year-over-year [E41]"). Market: `get_quote`
+  ×3 only. Checker 11/11. Cost drivers: one Gemini 503 (14.9 s before the next model answered) and a round-2 market
+  follow-up (1 call).
+- **B. Redeploy: NOT EXECUTED (safety check).** B1 `sam build`: Build Succeeded. B2 change set (explicit
+  `--stack-name research-desk --region ap-southeast-2 --capabilities CAPABILITY_IAM`; `$repo` and `$email` non-empty):
+  `CREATE_COMPLETE`, params `EnableWatchdog=false`, `AlertEmail` set. It had **3** rows: Modify `ApiFunction`,
+  Modify `AskWorkerFunction` and Modify `HttpApi`, all Replacement False. The `HttpApi` row is
+  `Properties.Body`, `Evaluation: Dynamic`, `CausingEntity: ApiFunction.Arn`: the OpenAPI body references the
+  function ARN, so CloudFormation re-evaluates it whenever the function changes. An image update keeps the ARN,
+  so the route would not really change, but the rule was "exactly 2 rows", so the change set was **deleted, not
+  executed**. Stack still `CREATE_COMPLETE` (last update 2026-11-07); both functions still run
+  `sha256:e9786b1b…` (11-07).
+- **B4. Image:** the new image is pushed to ECR (`sha256:f92da023…`, 300,932,386 bytes compressed; local 1.27 GB)
+  but not deployed. ECR keeps 2 images (D15), now the deployed one + this one: don't push a third image before
+  deploying, or the lifecycle rule expires the image the functions run on.
+- **C, D, E: NOT RUN.** AWS steps stop after a failed step (your rule), and all three would measure the 11-07 image,
+  not the fixes, at ~45–60 Gemini calls. Nothing was asked of the API this session.
+- Cold-start data that exists (I2 review, 11-09 CloudWatch, old image, warm image cache): ApiFunction Init
+  1573/1523/1400/1511/1526 ms; AskWorker Init 2920/2586/2808/2895 ms; no INIT_REPORT timeout. The I1 10 s init
+  timeout happened only on the first start of a newly pushed image.
+- **Next:** decide the B safety rule (accept the `HttpApi` Body row when it is `Dynamic` from `ApiFunction.Arn`
+  with Replacement False), then B2–B3, C, D, E.
 
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
