@@ -377,3 +377,37 @@ def test_trace_names_follow_up_agents_that_used_tools_leaves_out(no_checker_llm)
         result = deep.answer_deep("Compare NVIDIA and AMD revenue and stock moves")
     assert result["used_tools"] == ["filings"]                     # unchanged for the frozen scorer
     assert result["trace"]["follow_up_agents"] == ["news"] and "rounds[1]" in result["trace"]["note"]
+
+
+# ── I2 prompt fixes: latest period when the asked one isn't filed; no batch quote before get_quote ──
+
+def test_get_quotes_description_matches_what_it_returns():
+    """The batch tool's evidence has no market cap or P/E, and its description must say so."""
+    desc = tools.DECLARATIONS["get_quotes"].description
+    assert "NO market cap" in desc and "NO P/E" in desc and "get_quote" in desc
+    b = EvidenceBoard()
+    with mock.patch.object(tools.market, "get_quotes", return_value={"NVDA": QUOTE}):
+        tools.run_tool("get_quotes", {"tickers": ["NVDA"]}, b, "market")
+    summary = b.get("E1").summary.lower()
+    assert "market cap" not in summary and "p/e" not in summary and "202.06" in summary
+
+
+def test_market_prompt_sends_valuation_questions_to_get_quote():
+    system = specialists.SPECIALISTS["market"]["system"]
+    assert "Use get_quotes for several tickers" not in system
+    assert "if market cap or P/E is asked for, call get_quote for each ticker" in system
+
+
+def test_filings_prompt_reports_the_latest_period_and_keeps_partial_evidence():
+    system = specialists.SPECIALISTS["filings"]["system"]
+    assert "report the latest period you did find" in system
+    assert "requested period is not filed yet" in system
+    assert "even if it comes from a different period" in system
+    # Second round (I2): the mixed query "Q3 revenue ... customers concentration" missed the latest results.
+    assert "one company and one topic per query" in system
+    assert "search again for that company's latest results without naming a period" in system
+    # Searches go out together, so the extra search fits in loop.MAX_STEPS.
+    assert "Send independent searches together in the same step" in system
+    # A general rule: no company, ticker or specific quarter in the prompt.
+    for word in ("NVIDIA", "NVDA", "AMD", "Intel", "INTC", "Q3", "FY2027"):
+        assert word not in system, word
