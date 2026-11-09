@@ -16,6 +16,16 @@ Written by the Builder. One row per task; newest phase first.
   AMD and Intel Q3 2026 growth figures are copied from their 8-K press releases (E20, E21, E25), not computed.
 - Market specialist: `get_quotes` (batch: price + day change only) 6.09 s, then `get_quote` ×3 for market cap
   and P/E 3.64 s. The batch call added ~6 s and 1 Gemini call to the slowest specialist (the critical path).
+- Prompt fix round 1 (`086e417`): filings reports the latest period + "not filed yet" gap and keeps other-period
+  evidence; `get_quotes` description and market prompt send market cap / P/E to `get_quote`. Local Deep run (you):
+  15.09 s, 11 calls; market `get_quote` ×3 only (fixed); "Q3 not filed, latest is Q2 FY2027" gap and the
+  customer-concentration finding (16% of revenue) reach the answer; **but no NVIDIA latest-quarter revenue
+  finding**: one mixed query ("Q3 revenue growth segment details top customers concentration") missed the 10-Q /
+  8-K passage with $96.2B, +106% (it is in the index), and the three searches went out one per step (MAX_STEPS 3).
+- Prompt fix round 2 (last round for this issue, your decision): one company and one topic per query; send
+  independent searches together in one step; if the period is missing, search again for the latest results
+  without naming a period. If the next local run still omits NVIDIA's latest-quarter revenue, it is accepted as
+  a known limitation and we redeploy.
 
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API

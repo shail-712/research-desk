@@ -403,6 +403,11 @@ def test_filings_prompt_reports_the_latest_period_and_keeps_partial_evidence():
     assert "report the latest period you did find" in system
     assert "requested period is not filed yet" in system
     assert "even if it comes from a different period" in system
+    # Second round (I2): the mixed query "Q3 revenue ... customers concentration" missed the latest results.
+    assert "one company and one topic per query" in system
+    assert "search again for that company's latest results without naming a period" in system
+    # Searches go out together, so the extra search fits in loop.MAX_STEPS.
+    assert "Send independent searches together in the same step" in system
     # A general rule: no company, ticker or specific quarter in the prompt.
     for word in ("NVIDIA", "NVDA", "AMD", "Intel", "INTC", "Q3", "FY2027"):
         assert word not in system, word
