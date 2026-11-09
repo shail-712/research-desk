@@ -2,6 +2,21 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I2 — Deep mode on AWS (branch `iter-2`; 2026-11-09)
+- README: warm Quick on AWS ~6 s (NVDA P/E + news: market 3.9 s, news 1.8 s, Gemini 1.8 s; your measurement).
+- **Check 1, Deep `/ask` with the brief's query (you ran it; result read from `%TEMP%\deep-brief.json`):** `done`,
+  17.57 s, 10 Gemini calls, no fallback, not partial. Plan: NVDA, AMD, INTC; round 1 = filings 7.15 s (2 calls,
+  4 findings, 2 gaps), news 6.91 s (2, 5, 1), market 11.45 s (3, 3, 1). No round 2 (the follow-up call returned no
+  tasks). Checker 25/25 numbers matched evidence, 0 derived, 0 unsupported, 0 checker calls. 26 `E#` citations,
+  33 sources (12 cited). Calls: planner 1 + filings 2 + news 2 + market 3 + follow-up decision 1 + writer 1 = 10.
+- Found: NVIDIA's fiscal Q3 FY2027 isn't reported yet (latest in the index: 10-Q for the period ending 2026-07-26),
+  so the answer says NVIDIA Q3 "not found". But the filings specialist did retrieve that 10-Q's MD&A (E18) and its
+  "Concentration of Revenue and Customers" note (E16), and left both out of its findings; the writer only sees
+  evidence cited in findings, so the latest-period numbers and the customer data never reached the answer.
+  AMD and Intel Q3 2026 growth figures are copied from their 8-K press releases (E20, E21, E25), not computed.
+- Market specialist: `get_quotes` (batch: price + day change only) 6.09 s, then `get_quote` ×3 for market cap
+  and P/E 3.64 s. The batch call added ~6 s and 1 Gemini call to the slowest specialist (the critical path).
+
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
   `https://7c2tczydl3.execute-api.ap-southeast-2.amazonaws.com`, bucket `research-desk-databucket-dddxpuze63yn`,
