@@ -8,7 +8,8 @@ its source: a live quote, a news headline, or a passage from an SEC filing.
 It has two modes:
 
 - **Quick:** picks the tools the question needs, runs them in parallel, and
-  makes one Gemini call. A few seconds when warm.
+  makes one Gemini call. Median 3.0 s when run locally
+  ([eval](docs/eval/v2-results.md)); warm latency on AWS is measured in I2.
 - **Deep:** a supervisor sends the question to three specialists (market,
   news, filings) in parallel. They post evidence to a shared board, and a
   fact-checker checks every number in the final answer against that evidence.
@@ -30,8 +31,9 @@ about $0/month: Gemini free tier, a small DynamoDB table, no always-on servers.
 5. **Tools run in parallel.**
    - Keyword routing decides which tools the question needs and which
      companies it mentions.
-   - The tools are market data (yfinance, with Finnhub as a fallback), news,
-     and SEC filings search over a 934-chunk vector index loaded from S3.
+   - The tools are market data (yfinance, with Finnhub as a fallback), news
+     (Yahoo Finance RSS, no key), and SEC filings search over a 934-chunk
+     vector index loaded from S3.
    - All the tools share one deadline, so a slow tool gets cut off instead of
      holding everything up.
 6. **Gemini answers.** Every tool result is labelled `[Doc N]`. One Gemini
@@ -65,12 +67,16 @@ The keys `.env` needs:
 | Key | What it's for |
 |---|---|
 | `GEMINI_API_KEY` | Answers and embeddings (free tier) |
-| `FINNHUB_API_KEY` | Market data fallback and news |
+| `FINNHUB_API_KEY` | Market data fallback (quotes when yfinance fails). News uses Yahoo Finance RSS and needs no key |
 | `SEC_USER_AGENT` | Required by SEC EDGAR (a name and email) |
 | `APP_ACCESS_CODE` | Shared secret for the API's `x-access-code` header |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Watchdog alerts |
 
-<!-- TODO (Builder): add one exact `cli.py agent` example with its real arguments. -->
+Ask a question locally (add `--deep` for the multi-agent mode):
+
+```powershell
+python cli.py agent "What is AMD's market cap and P/E ratio, and the latest headlines?"
+```
 
 ## Use the deployed API
 
@@ -97,9 +103,83 @@ From the command line, run the same collection with newman:
 
 ## Deploy to AWS
 
-<!-- TODO (Builder): exact deploy steps — ECR stack, bootstrap secrets,
-sam build, sam deploy (with the flags used in I1), bootstrap index/watchlist,
-and the teardown list from PROGRESS.md. -->
+Region `ap-southeast-2` (the only one this account can use, see D17). Needs the
+AWS CLI, SAM CLI, Docker Desktop running, a filled-in `.env`, and the local
+index in `data/index/index.npz`. Run from the repo root in PowerShell.
+
+```powershell
+$env:PYTHONIOENCODING = "utf-8"
+$region = "ap-southeast-2"
+
+# 1. ECR repository, its own stack (D15). Once per account.
+aws cloudformation deploy --template-file infra/ecr.yaml --stack-name research-desk-ecr --region $region
+$repo = aws cloudformation describe-stacks --stack-name research-desk-ecr --region $region `
+  --query "Stacks[0].Outputs[?OutputKey=='ImageRepositoryUri'].OutputValue" --output text
+
+# 2. Secrets from .env to SSM SecureStrings, BEFORE the first deploy. Each Lambda
+#    container reads SSM once at cold start, so secrets must exist first.
+python -m scripts.bootstrap --skip index watchlist
+
+# 3. Build the image (one image for all functions).
+sam build
+
+# 4. Create the change set (the flags used in I1), review it, then execute it.
+sam deploy --no-execute-changeset --image-repository $repo `
+  --parameter-overrides EnableWatchdog=false AlertEmail=<your email>
+$cs = aws cloudformation list-change-sets --stack-name research-desk --region $region `
+  --query "Summaries[-1].ChangeSetId" --output text
+aws cloudformation describe-change-set --change-set-name $cs --region $region `
+  --query "Changes[].ResourceChange.[Action,LogicalResourceId,ResourceType]" --output table
+aws cloudformation execute-change-set --change-set-name $cs --region $region
+aws cloudformation wait stack-create-complete --stack-name research-desk --region $region
+
+# 5. Upload the index (create-only) and seed the watchlist (NVDA, AMD, INTC).
+python -m scripts.bootstrap --skip secrets
+
+# 6. Smoke test.
+$url = aws cloudformation describe-stacks --stack-name research-desk --region $region `
+  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text
+curl.exe $url/health        # {"ok": true}
+```
+
+With `EnableWatchdog=false` the stack has 14 resources and no price-alert
+path. `EnableWatchdog=true` adds the scan and notify functions, the Scheduler,
+the DynamoDB Stream, the DLQ and its alarm. Confirm the SNS subscription email
+that AWS sends to `AlertEmail`.
+
+### Teardown
+
+Four things to remove (written from `docs/PROGRESS.md`, not run yet):
+
+```powershell
+$region = "ap-southeast-2"
+function Empty-Bucket($name) {   # removes all object versions, so versioned buckets empty too
+  python -c "import boto3,sys; boto3.resource('s3', region_name='$region').Bucket(sys.argv[1]).object_versions.delete()" $name
+}
+
+# 1. The main stack. Its DataBucket is Retain, so it outlives the stack.
+$bucket = aws cloudformation describe-stacks --stack-name research-desk --region $region `
+  --query "Stacks[0].Outputs[?OutputKey=='DataBucketName'].OutputValue" --output text
+sam delete --stack-name research-desk --region $region
+Empty-Bucket $bucket; aws s3 rb "s3://$bucket" --region $region
+
+# 2. The ECR stack. CloudFormation can't delete a repository that still has images.
+aws ecr delete-repository --repository-name research-desk --force --region $region
+aws cloudformation delete-stack --stack-name research-desk-ecr --region $region
+
+# 3. SAM's own stack and bucket (created by resolve_s3 = true in samconfig.toml).
+$samBucket = aws cloudformation describe-stack-resources --stack-name aws-sam-cli-managed-default --region $region `
+  --query "StackResources[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" --output text
+Empty-Bucket $samBucket
+aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --region $region
+aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default --region $region
+aws s3 rb "s3://$samBucket" --region $region   # only if the stack kept it
+
+# 4. The secrets.
+aws ssm delete-parameters --region $region --names /research-desk/GEMINI_API_KEY `
+  /research-desk/FINNHUB_API_KEY /research-desk/TELEGRAM_BOT_TOKEN /research-desk/TELEGRAM_CHAT_ID `
+  /research-desk/SEC_USER_AGENT /research-desk/APP_ACCESS_CODE
+```
 
 ## Docs
 
