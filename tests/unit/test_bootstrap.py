@@ -82,3 +82,13 @@ def test_watchlist_is_seeded_only_once(aws):
     create_table(aws["ddb"], "ResearchDesk")
     assert bootstrap.seed_watchlist("ResearchDesk", "ap-south-1", resource=aws["ddb"]) == "seeded NVDA, AMD, INTC"
     assert bootstrap.seed_watchlist("ResearchDesk", "ap-south-1", resource=aws["ddb"]).startswith("kept the existing")
+
+
+def test_secrets_only_run_needs_no_stack(aws, monkeypatch, capsys):
+    """Secrets go to SSM before the first `sam deploy`, so the run must not read stack outputs."""
+    monkeypatch.setenv("APP_ACCESS_CODE", "code-secret")
+    monkeypatch.setattr(bootstrap, "stack_outputs", lambda *a: pytest.fail("read the stack"))
+    assert bootstrap.main(["--region", "ap-south-1", "--skip", "index", "watchlist"]) == 0
+    out = capsys.readouterr().out
+    assert "secret APP_ACCESS_CODE: created" in out and "code-secret" not in out
+    assert aws["ssm"].get_parameter(Name="/research-desk/APP_ACCESS_CODE")["Parameter"]["Type"] == "SecureString"

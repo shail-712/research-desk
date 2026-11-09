@@ -2,6 +2,43 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
+- Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
+  `https://7c2tczydl3.execute-api.ap-southeast-2.amazonaws.com`, bucket `research-desk-databucket-dddxpuze63yn`,
+  table `research-desk-Table-PPKATV744XD2`. SNS budget-alert subscription confirmed. The six secrets are in SSM under `/research-desk/`.
+- `python -m scripts.bootstrap --skip secrets` → `index: uploaded 934 chunks to s3://…/vectors/index.npz
+  (ETag "c5d499974602f4835d1d7ad0532b3fe3")`, `watchlist: seeded NVDA, AMD, INTC`.
+- Checks (2026-11-07 12:15 UTC): `curl.exe -i $URL/health` → `200 {"ok": true}`; `curl.exe -i $URL/watchlist`
+  with no `x-access-code` → `401 {"error": "Missing or wrong x-access-code"}`. API Gateway's request ID is
+  echoed in `X-Request-Id`.
+- `newman` (npx cache, 6.2.3) on the I1 requests only (health, 401, watchlist get/add/remove, quotes, news NVDA,
+  Quick ask + poll, 400); Deep and Feed left out: **20 requests, 30/30 assertions, 0 failed, 49 s**. The Quick
+  poll ran ~10 extra times (~30 s). Also covers the "Quick `/ask` returns `done` with sources" check.
+- No scan/notify resources: `describe-stack-resources` lists 14 (Api/AskWorker functions + roles + logs,
+  Table, DataBucket, HttpApi + stage, AlarmTopic, MonthlyBudget).
+- **Cold-start baseline for I2** (job `bb7ecd65…`, 12:22 UTC; job item + CloudWatch, read-only). Question: "What is
+  AMD's market cap and P/E ratio, and what are the latest headlines?" → tools `market`, `news`; 6 sources (yfinance
+  quote, session 2026-11-06, + 5 headlines), every number cited `[Doc 1]`.
+  | Step | Time |
+  |---|---|
+  | ApiFunction cold init (512 MB) | 2.7 s (`/health`, first call) |
+  | `POST /ask` → 202 | 12:22:32.2 |
+  | AskWorker init, try 1 (1024 MB image) | **timed out at 10.0 s** (`INIT_REPORT … Status: timeout`) |
+  | AskWorker init, try 2 (inside the invoke) | ~3.7 s (SSM secrets loaded again, then START 12:22:46.3) |
+  | Tools (parallel) | market:AMD 4.28 s (yfinance 3.30 s), news:AMD 1.46 s |
+  | Gemini (`gemini-3.5-flash-lite`, 1032 tokens) | 12.78 s (llm 12.98 s) |
+  | Answer total / `llm_calls` | 17.46 s / 1 |
+  | Worker REPORT | Duration 21.25 s (incl. init try 2), max memory 276 MB |
+  | 202 → `done` (finished 12:23:03.8) | **~31.5 s** |
+  The first init timeout is Lambda's 10 s init limit: the first start of a new image is slow, and Lambda then
+  re-runs init inside the invoke (that time counts against the 120 s timeout). It still answered, but it added
+  ~10 s. For I2: measure a second cold start, and a warm run, before deciding whether imports need to be lazier.
+  Gemini at ~13 s for one short answer is the biggest share.
+- **For the cleanup docs:** `resolve_s3 = true` (`samconfig.toml`) made SAM create its own stack
+  `aws-sam-cli-managed-default` with bucket `aws-sam-cli-managed-default-samclisourcebucket-axv5i4db6gwc`.
+  It isn't part of `research-desk`. Teardown must empty that bucket and delete that stack too, as well as
+  `research-desk` (its `DataBucket` is `Retain`, so empty and delete it by hand) and the ECR stack.
+
 ## I0 — Unblock AWS (branch `iter-0`; 2026-11-07)
 - Region is `ap-southeast-2` (D17). Read-only probes: all six ITERATIONS checks plus apigatewayv2, sqs, sns,
   scheduler, logs, cloudwatch, events and iam succeed there; `ap-south-1` and `us-east-1` are AccessDenied (except

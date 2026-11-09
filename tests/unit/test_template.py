@@ -88,7 +88,10 @@ def test_dynamodb_stays_on_the_free_tier_and_matches_the_code(template):
     assert table["KeySchema"] == TABLE_DEFINITION["KeySchema"]
     assert table["AttributeDefinitions"] == TABLE_DEFINITION["AttributeDefinitions"]
     assert table["TimeToLiveSpecification"] == {"AttributeName": "expires_at", "Enabled": True}
-    assert table["StreamSpecification"]["StreamViewType"] == TABLE_DEFINITION["StreamSpecification"]["StreamViewType"]
+    # The stream exists only with EnableWatchdog=true (only NotifyFunction reads it).
+    on, off = table["StreamSpecification"]["!If"][1:]
+    assert table["StreamSpecification"]["!If"][0] == "WatchdogEnabled" and off == {"!Ref": "AWS::NoValue"}
+    assert on["StreamViewType"] == TABLE_DEFINITION["StreamSpecification"]["StreamViewType"]
 
 
 def test_own_ecr_repository_keeps_two_images():
@@ -178,3 +181,64 @@ def test_functions_use_the_shared_image_and_real_handlers(template):
         module, func = props["ImageConfig"]["Command"][0].rsplit(".", 1)
         source = (ROOT / (module.replace(".", "/") + ".py")).read_text(encoding="utf-8")
         assert f"def {func}(" in source, f"{name}: {module}.{func} not found"
+
+
+# ── EnableWatchdog switch (I1 deploys without the price-alert path, I3 adds it) ──
+
+WATCHDOG_ONLY = {"ScanFunction", "NotifyFunction", "NotifyDLQ", "FailedAlertsAlarm", "ScanLogs", "NotifyLogs"}
+
+
+def _deployed(template, enable_watchdog: str) -> set[str]:
+    """Logical IDs CloudFormation would create for EnableWatchdog=<value>."""
+    assert template["Conditions"]["WatchdogEnabled"] == {"!Equals": [{"!Ref": "EnableWatchdog"}, "true"]}
+    on = {"WatchdogEnabled": enable_watchdog == "true", "HasAlertEmail": True}
+    return {k for k, v in template["Resources"].items() if on.get(v.get("Condition"), True)}
+
+
+def _referenced_ids(node) -> set[str]:
+    if isinstance(node, dict):
+        out = set()
+        for key, value in node.items():
+            if key == "!Ref" and isinstance(value, str):
+                out.add(value)
+            elif key == "!GetAtt":
+                out.add((value.split(".")[0] if isinstance(value, str) else value[0]))
+            elif key == "!Sub":
+                text = value if isinstance(value, str) else value[0]
+                out |= {m.split(".")[0] for m in re.findall(r"\$\{([^}!]+)\}", text)}
+            out |= _referenced_ids(value)
+        return out
+    if isinstance(node, list):
+        return set().union(*map(_referenced_ids, node)) if node else set()
+    return set()
+
+
+def test_enable_watchdog_defaults_to_off(template):
+    param = template["Parameters"]["EnableWatchdog"]
+    assert param["Default"] == "false" and param["AllowedValues"] == ["true", "false"]
+
+
+@pytest.mark.parametrize("value", ["false", "true"])
+def test_enable_watchdog_selects_the_alert_resources(template, value):
+    deployed = _deployed(template, value)
+    if value == "false":
+        assert not deployed & WATCHDOG_ONLY
+        assert {"Table", "DataBucket", "HttpApi", "ApiFunction", "AskWorkerFunction",
+                "ApiLogs", "AskWorkerLogs", "AlarmTopic"} <= deployed
+    else:
+        assert WATCHDOG_ONLY <= deployed
+    # Nothing that is created may point at something that isn't (the deploy would fail).
+    for name in deployed:
+        missing = (_referenced_ids(template["Resources"][name]) & set(template["Resources"])) - deployed
+        assert not missing, f"{name} references {missing}, which EnableWatchdog={value} leaves out"
+    for name, output in template["Outputs"].items():
+        if output.get("Condition") == "WatchdogEnabled" and value == "false":
+            continue
+        missing = (_referenced_ids(output) & set(template["Resources"])) - deployed
+        assert not missing, f"output {name} references {missing}"
+
+
+def test_log_groups_share_their_function_condition(template):
+    for name in ("Scan", "Notify", "Api", "AskWorker"):
+        fn = template["Resources"][f"{name}Function"].get("Condition")
+        assert template["Resources"][f"{name}Logs"].get("Condition") == fn
