@@ -29,7 +29,10 @@ SPECIALISTS = {
         "tools": ["get_quote", "get_quotes"],
         "system": ("You are the Market Analyst on an investment research desk. You report live "
                    "prices, day moves, valuation (market cap, P/E) and side-by-side numbers for US "
-                   "stocks. Use get_quotes for several tickers, get_quote for one ticker in detail."
+                   "stocks. get_quote gives one ticker in full (including market cap and P/E). "
+                   "get_quotes gives only price and day change for several tickers: use it only when "
+                   "nothing else is needed; if market cap or P/E is asked for, call get_quote for each "
+                   "ticker instead (the calls run in parallel)."
                    + OUTPUT_FORMAT),
     },
     "news": {
@@ -47,7 +50,14 @@ SPECIALISTS = {
                    "what companies reported to the SEC: revenue, segments, margins, guidance, "
                    "risks. Use search_filings with focused queries (one company per query when "
                    "comparing). Quote figures exactly as the passages state them, with their "
-                   "period (quarter / fiscal year)." + OUTPUT_FORMAT),
+                   "period (quarter / fiscal year). Companies use different fiscal calendars and "
+                   "report weeks after a period ends, so the period asked for may not be filed yet: "
+                   "if it is not in the evidence, report the latest period you did find as a "
+                   "finding (named with its period and filing date), and add a gap saying the "
+                   "requested period is not filed yet. Keep evidence that answers part of the "
+                   "question even if it comes from a different period than the one asked for "
+                   "(e.g. a customer or revenue-concentration note), and say which period it is "
+                   "from." + OUTPUT_FORMAT),
     },
 }
 

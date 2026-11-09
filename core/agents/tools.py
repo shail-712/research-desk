@@ -31,7 +31,8 @@ DECLARATIONS = {
                      required=["ticker"])),
     "get_quotes": types.FunctionDeclaration(
         name="get_quotes",
-        description="Price and day change % for SEVERAL US stocks at once (use for comparisons).",
+        description=("Price, day change % and previous close for SEVERAL US stocks at once. Returns NO "
+                     "market cap and NO P/E: when those are needed, call get_quote for each ticker instead."),
         parameters=S(type=OBJECT, properties={"tickers": S(type=ARRAY, items=S(type=STRING))},
                      required=["tickers"])),
     "get_news": types.FunctionDeclaration(
