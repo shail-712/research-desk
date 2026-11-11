@@ -94,7 +94,7 @@ Status key: **BUILT+VERIFIED** = in code and shown working on AWS or in a record
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Unit tests: **407**, all mocked (moto for AWS) | VERIFIED 2026-11-11 | `python -m pytest` → `407 passed in 45.16s` (run for this file). |
+| Unit tests: **408**, all mocked (moto for AWS) | VERIFIED 2026-11-11 | `python -m pytest` → `408 passed in 51.20s` (after the eval-runner test was added). |
 | CI: GitHub Actions, pytest on every push and PR | BUILT | `.github/workflows/ci.yml`. |
 | Postman collection + newman | VERIFIED | 20 requests, 30/30 assertions, 0 failed (PROGRESS I1, 2026-11-07). Deep and Feed routes not in that run. |
 | Eval harness: 20 questions, frozen code-only scorer (no LLM judge), local and API targets | BUILT+VERIFIED | `evals/run.py`, `evals/scoring.py`, `evals/questions.json`; scorer byte-identical to v1's (v1-baseline.md). |
@@ -152,7 +152,7 @@ Caveats you must be ready to state: the v1 corpus was three older 10-Q PDFs (1,4
 | Number | Source |
 |---|---|
 | **934** filing chunks (AMD 375, INTC 292, NVDA 267) | PROGRESS A.10, 2026-11-05 |
-| **407** unit tests passing | pytest run, 2026-11-11 |
+| **408** unit tests passing | pytest run, 2026-11-11 |
 | newman 20 requests / **30 of 30** assertions | PROGRESS I1, 2026-11-07 |
 | Stack of 14 resources with the Watchdog off | PROGRESS I1 |
 | Image 301 MB compressed | PROGRESS I2 B4 |
@@ -177,7 +177,7 @@ Caveats you must be ready to state: the v1 corpus was three older 10-Q PDFs (1,4
 4. **Ingested latest 10-K, 10-Q and earnings 8-K filings from SEC EDGAR into a 934-chunk FAISS index on S3, with content-hash embedding caching so re-ingests never re-embed unchanged text.** (29 words)
    - *How does it work?* Section-aware chunking (215 words, 36 overlap), Gemini embeddings at 768 dims cached in SQLite by sha256 of model, dimension, task and text. The index is one .npz on S3, loaded once per Lambda container and kept in memory, with an ETag re-check every 5 minutes. Uploads are create-only/If-Match so two writers can't clobber each other.
 
-Optional 5th, if you have room: **Shipped with 407 mocked unit tests in GitHub Actions CI, a frozen 20-question eval harness, SSM-managed secrets, change-set-reviewed deploys and a $1 budget alarm.** (27 words). *How?* moto for AWS, no network in tests; the scorer is a byte-identical port of v1's, so v1 and v2 are scored the same way.
+Optional 5th, if you have room: **Shipped with 408 mocked unit tests in GitHub Actions CI, a frozen 20-question eval harness, SSM-managed secrets, change-set-reviewed deploys and a $1 budget alarm.** (27 words). *How?* moto for AWS, no network in tests; the scorer is a byte-identical port of v1's, so v1 and v2 are scored the same way.
 
 ### (b) Template for after the full deployed eval (I4)
 
