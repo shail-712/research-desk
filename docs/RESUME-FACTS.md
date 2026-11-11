@@ -135,13 +135,15 @@ Status key: **BUILT+VERIFIED** = in code and shown working on AWS or in a record
 
 | Metric | v1 (20 Q, local, 11-05) | v2 local (20 Q, 11-06) | v2 deployed (5 Q, 11-09) | v2 deployed full 20 Q |
 |---|---|---|---|---|
-| Untraceable numbers, Quick | 3/105 (3%) | 3/140 (2%) | **0/65 (0%)** | PENDING (I4) |
-| Untraceable numbers, Deep | 0/78 (0%) | 2/97 (2%) | **0/47 (0%)** | PENDING |
-| Every-number-traces, Quick / Deep | 95% / 100% | 90% / 95% | 100% / 100% | PENDING |
-| Routing, Quick / Deep | 80% / 100% | 80% / 100% | 80% / 100% | PENDING |
-| Numeric lines with a citation, Quick | **44%** | **87%** | 87% | PENDING |
-| Numeric lines with a citation, Deep | 88% | 90% | 79% | PENDING |
-| Answered | 40/40 | 40/40 | 10/10 | PENDING |
+| Untraceable numbers, Quick | 3/105 (3%) | 3/140 (2%) | **0/65 (0%)** | **2/161 (1%)** |
+| Untraceable numbers, Deep | 0/78 (0%) | 2/97 (2%) | **0/47 (0%)** | **1/141 (1%)** |
+| Every-number-traces, Quick / Deep | 95% / 100% | 90% / 95% | 100% / 100% | 90% / 95% |
+| Routing, Quick / Deep | 80% / 100% | 80% / 100% | 80% / 100% | 80% / 95% |
+| Numeric lines with a citation, Quick | **44%** | **87%** | 87% | **91%** |
+| Numeric lines with a citation, Deep | 88% | 90% | 79% | 82% |
+| Answered | 40/40 | 40/40 | 10/10 | 40/40 |
+
+The full deployed column was filled in on 2026-11-11 and is detailed in §5.
 
 Caveats you must be ready to state: the v1 corpus was three older 10-Q PDFs (1,491 chunks, no 10-K); v2 uses the latest 10-K/10-Q/8-K (934 chunks), so filing results are not like-for-like (v1-baseline "Comparability caveats"). The deployed subset is 5 questions, so don't compare its totals with v1's 20. "Derived" numbers (e.g. a computed growth rate) count as untraceable in the scorer.
 
@@ -191,3 +193,79 @@ Optional: **Cut Deep-mode Gemini calls per answer from 8.3 (v1) to [CALLS_DEEP] 
 ### Words to avoid (not supported)
 
 "/tmp caching", "cut cold-start latency", "DynamoDB cache for market data/news", "reduced API calls / rate-limit failures by X", "$0/month" stated as a measured cost, "price alerts in production" (the Watchdog isn't deployed), "Streamlit UI".
+
+---
+
+## 5. Full deployed eval (added 2026-11-11)
+
+**Run:** `python -m evals.run --target api` against the deployed stack (image `f92da023`, confirmed read-only on
+2026-11-11: both functions on `sha256:f92da023…`; nothing code-relevant changed since). All 20 questions × Quick and
+Deep = **40/40 answered**. 10 answers (s1 c1 c4 f3 w1) are from the 2026-11-09 subset on the same image, and the other
+30 are from 2026-11-11. That's 80 new Gemini generation calls, with no 429s, no quota-tainted answers and no
+fallbacks. Full tables: `docs/eval/v2-results.md` → "Deployed (full)". Scorer `evals/scoring.py` untouched (D8).
+
+### v1 vs v2: same 20 questions, same frozen scorer
+
+| Metric | v1 Quick | **v2 Quick (AWS)** | v1 Deep | **v2 Deep (AWS)** |
+|---|---|---|---|---|
+| Answered | 20/20 | **20/20** | 20/20 | **20/20** |
+| Numbers not traceable to evidence | 3/105 (3%) | **2/161 (1%)** | 0/78 (0%) | **1/141 (1%)** |
+| Answers where every number traces | 95% | **90%** | 100% | **95%** |
+| Right companies found | 100% | **100%** | 100% | **100%** |
+| Right tools/agents used | 80% | **80%** | 100% | **95%** |
+| Numeric lines with a citation | 44% | **91%** | 88% | **82%** |
+| Latency p50 | 3.6 s | **6.5 s** | 16.4 s | **13.2 s** |
+| Latency p90 | 14.0 s | **10.4 s** | 47.1 s | **20.3 s** |
+| Gemini calls per question (mean) | 1.2 | **1.0** | 8.3 | **4.7** |
+| Follow-up rounds / ⚠️ flags / fell back to Quick | 0 / 0 / 0 | **0 / 0 / 0** | 5 / 0 / 1 | **0 / 0 / 0** |
+
+v1 = v1 @ `73b6fda` rerun locally on 2026-11-05 (`docs/eval/v1-baseline.md`).
+
+### What each metric means (as `evals/scoring.py` computes it)
+
+- **Answered:** the result has a non-empty `answer`. Every other metric is computed over answered results only.
+- **Numbers not traceable:** the fact-checker's code stage (`core/numbers.py`, no LLM) pulls every number out of the
+  answer and looks for it, within display precision, in the context that answer was built from. Unmatched / all numbers.
+- **Answers where every number traces:** the share of answers with zero unmatched numbers.
+- **Right companies found:** the question's expected tickers are a subset of the companies the answer resolved.
+- **Right tools/agents used:** the expected agents are a subset of the agents used. Quick tools are mapped market→market,
+  news→news, rag→filings; Deep counts round-1 agents only.
+- **Numeric lines with a citation:** answer sentences longer than 20 characters that contain a digit; the share that
+  include `[E#` or `[Doc N`.
+- **Latency p50 / p90:** seconds per answered question. On AWS this is measured by the client from `POST /ask` to the
+  poll that returns `done`, so it includes network and up to 2 s of polling. v1 was timed in-process on a laptop.
+- **Gemini calls per question:** mean of the recorded call count (`timings.llm_calls` on AWS), including failed
+  attempts.
+- **Follow-up rounds / flags / fallbacks:** answers with a 2nd Deep round; numbers the checker marked ⚠️unverified;
+  Deep answers that fell back to Quick.
+
+### Honest caveats
+
+1. **Different filings data.** v1 searched three older 10-Q PDFs (1,491 chunks, no 10-K, no section metadata). v2
+   searches the latest 10-K, 10-Q and earnings 8-K per company (934 chunks). Filing answers are not like-for-like.
+2. **Different days and environments.** v1 ran 2026-11-05 on a laptop; v2 ran 2026-11-09/11 on AWS. Prices and news
+   differ, and Gemini load differs. v1's run was also hit by an overloaded primary model (v1-baseline "Models").
+3. **Latency isn't apples to apples.** v2's figures include API Gateway, an async Lambda hop, cold starts and 2 s
+   polling, while v1's are in-process. Quick p50 is *slower* on AWS (6.5 s vs 3.6 s); claim Quick's p90 or Deep only
+   with that caveat.
+4. **The 3 v2 untraceable numbers are correct derived values** (dollar changes: s3 `$1.24` = $59.37 − $58.13 for
+   INTC; w3 Quick `$9.78`). The frozen scorer counts any derived number as untraceable. That's also why "every number
+   traces" is 90%/95%, not 100%.
+5. **Routing misses are real.** Quick's keyword rules can't route "why" questions to news + market (w1–w4, the same
+   limitation as v1). Deep missed one: w3, where the planner sent only the news agent and no market agent.
+6. **Deep citation coverage fell** (88% → 82%), mostly on comparisons (81% → 61%). Don't claim a citation improvement
+   for Deep.
+7. **Sample size:** 20 questions per mode, one run each. Small differences (1% vs 3%) are within run-to-run noise.
+
+### Resume bullet options (only these numbers)
+
+1. **Evaluated v2 against v1 on a 20-question benchmark with a frozen code-based scorer; deployed answers cited sources
+   on 91% of numeric lines (v1: 44%), with 1% untraceable numbers.** (29 words)
+   - *How does it work?* Every context item is labelled `[Doc N]` and the prompt requires a citation per number; the
+     scorer is a byte-identical port of v1's, with no LLM judge. The 1% are correct derived dollar changes the code
+     scorer can't trace.
+2. **Cut multi-agent Deep-mode Gemini calls per answer from 8.3 to 4.7 and p90 latency from 47 s to 20 s versus v1,
+   while answering all 40 deployed eval questions without fallback.** (29 words)
+   - *How does it work?* A keyword fast path skips the planner for simple questions; specialists batch parallel tool
+     calls in one step under a shared deadline; the checker's code stage clears most numbers without an LLM call. The
+     v1 latency was measured locally and v2's on AWS, which only makes v2's number harder to hit.

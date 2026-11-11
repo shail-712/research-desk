@@ -2,6 +2,20 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## Full deployed eval, brought forward from I4 (branch `iter-2`; 2026-11-11)
+- Image check (read-only): ApiFunction and AskWorker both on `sha256:f92da023…`, stack UPDATE_COMPLETE 2026-11-09.
+  Since `a0f0b37` only a test file and docs changed (not in the image), so no redeploy.
+- Estimate: ~150 Gemini calls from scratch (Quick 20, Deep ~123 local / ~130 at the subset's AWS rate); ~112–120
+  for the 30 answers not yet saved. Actual: **80** new calls.
+- Runner change (`evals/run.py`, scorer untouched, D8): an answer whose error/notice/trace shows `HTTP 429` or
+  `RESOURCE_EXHAUSTED` no longer counts as done, so a quota-hit Deep answer (which falls back to Quick or loses a
+  specialist rather than failing) is retried by the same command. Section renamed "Deployed (full)"; the 11-09
+  subset section is kept above it as a dated block. Test: `test_rerun_retries_answers_cut_short_by_the_quota`.
+- `python -m evals.run --target api --url $url` → **40/40 answered**, no quota hits, no fallbacks. Untraceable 2/161
+  Quick, 1/141 Deep (all three are correct derived dollar changes); citations 91% / 82%; routing 80% / 95% (Deep
+  w3: planner sent news only); p50 6.5 s / 13.2 s, p90 10.4 s / 20.3 s; calls 1.0 / 4.7. Report re-rendered with
+  `--report-only --note …`. Resume write-up: `docs/RESUME-FACTS.md` §5.
+
 ## I2 — Deep mode on AWS (branch `iter-2`; 2026-11-09)
 - README latency: the ~6 s NVDA P/E + news run (job `25cc5783`) was a **cold** worker (Init Duration 2920 ms), not
   warm (review I2, finding 3). README now cites the measured numbers from steps C and E below: Quick p50 5.8 s on
