@@ -14,7 +14,7 @@ The v1 repo (`../investment-research-assistant` @ `73b6fda`) was used only to ch
 | Claim | Verdict | Evidence |
 |---|---|---|
 | Serverless on Lambda + API Gateway | **TRUE** | `template.yaml:103` / `:136` (`PackageType: Image` functions), HttpApi throttling `template.yaml:97`. Deployed: PROGRESS I1 (stack CREATE_COMPLETE, 2026-11-07), I2 B3 (UPDATE_COMPLETE, 2026-11-09). |
-| Multi-agent with specialized market / news / retrieval agents | **TRUE (Deep mode only)** | `core/agents/specialists.py:26-46` (`SPECIALISTS` = market, news, filings), run in parallel by `core/agents/deep.py:78` (`_dispatch`). Quick mode is not multi-agent: it is one Gemini call over tool results (`core/agent.py:1-9`). |
+| Multi-agent with specialized market / news / retrieval agents | **TRUE (Deep mode only)** | `core/agents/specialists.py:26-46` (`SPECIALISTS` = market, news, filings), run in parallel by `core/agents/deep.py:78` (`_dispatch`). Quick mode is not multi-agent: it is one Gemini call over tool results (`core/agent.py:1-9`). **Caveat (deployed eval set, 2026-11-09/11):** only 4 of the 20 Deep answers ran 2+ specialists (c5, w1, w2, w4). 10 took the single-agent fast path, and for 6 more the planner chose one specialist. The brief's 3-company query ran all three in parallel in 15.81 s (PROGRESS I2 D). |
 | "Gemini-driven orchestrator that classifies queries and routes" | **PARTLY TRUE** | **Quick: keyword rules, no Gemini.** `core/agent.py:47-56` (`classify_query`, regexes at `:35-44`). **Deep: a Gemini supervisor plans.** `core/agents/supervisor.py:87-91` (`plan()` makes a structured-JSON Gemini call with `PLAN_SCHEMA`, `:29`). **But Deep also uses the keyword rules first:** `core/agents/deep.py:115-121` sends single-intent, single-company questions down a fast path to one specialist, with no planner call. Accurate wording: "a Gemini supervisor plans multi-part questions; simple ones take a keyword fast path." |
 
 ### Bullet 2: "RAG pipeline using FAISS vector search over financial filings, with S3-backed embeddings and /tmp warm-start caching to cut cold-start latency"
@@ -108,8 +108,10 @@ Status key: **BUILT+VERIFIED** = in code and shown working on AWS or in a record
 
 | Number | Source and date |
 |---|---|
-| Quick p50 **5.8 s**, p90 **6.0 s** (5 questions, end to end incl. polling) | v2-results Deployed, 2026-11-09 |
-| Deep p50 **11.3 s**, p90 **17.6 s** (same 5 questions) | v2-results Deployed, 2026-11-09 |
+| Quick p50 **6.5 s**, p90 **10.4 s** (20-question eval set, end to end incl. polling) | v2-results Deployed (full), 2026-11-09/11 |
+| Deep p50 **13.2 s**, p90 **20.3 s** (same 20 questions; 18 of 20 within 20.3 s) | v2-results Deployed (full), 2026-11-09/11 |
+| Deep, full planner pipeline only (10 of 20): p50 **16.6 s**, p90 **21.8 s**; fast path (10): p50 12.0 s, p90 19.6 s | v2-results line after Deployed (full), re-scored 2026-11-12 |
+| History, 5-question subset: Quick p50 5.8 s, p90 6.0 s; Deep p50 11.3 s, p90 17.6 s. Superseded by the full run | v2-results Deployed (subset), 2026-11-09 |
 | Quick warm **~6.6 s** end to end, **4.0 s** in the worker | PROGRESS I2 C, 2026-11-09 |
 | Quick cold **~10.0 s** end to end; worker init **3.8 s**, API init 2.0 s | PROGRESS I2 C, 2026-11-09 |
 | First-ever cold start on a new image: **~31.5 s** (10 s init timeout, then retry) | PROGRESS I1, 2026-11-07 (the case that justified 202/poll) |
@@ -128,8 +130,9 @@ Status key: **BUILT+VERIFIED** = in code and shown working on AWS or in a record
 
 | Number | Source |
 |---|---|
-| Quick **1.0** (AWS subset), 1.2 (local, includes failed attempts) | v2-results Deployed / Local |
-| Deep **5.6** (AWS subset); **8.3 → 6.2** v1 → v2 (local, 20 questions) | v2-results Deployed / Local |
+| Quick **1.0** (AWS, 20 questions), 1.2 (local, includes failed attempts) | v2-results Deployed (full) / Local |
+| Deep **4.7** (AWS, 20 questions: full planner pipeline 6.0, fast path 3.3); **8.3 → 6.2** v1 → v2 (local, 20 questions) | v2-results Deployed (full) / Local |
+| History: Deep 5.6 on the 5-question AWS subset (2026-11-09) | v2-results Deployed (subset) |
 
 ### Accuracy (frozen code scorer, same as v1's)
 
@@ -165,30 +168,27 @@ Caveats you must be ready to state: the v1 corpus was three older 10-Q PDFs (1,4
 
 ### (a) Using only numbers measured to date
 
-1. **Built a serverless AI equity-research API on AWS (Lambda, API Gateway, DynamoDB, S3, SAM) with an async 202/poll job pattern; Quick answers return in 5.8 s median deployed.** (27 words)
+Refilled on 2026-11-12 from the full deployed eval (v2-results "Deployed (full)"). The 5-question subset numbers
+that were here are kept only as history in §3. 4(a)3 and §5 bullet 1 use the same eval numbers, so pick one of them.
+
+1. **Built a serverless AI equity-research API on AWS (Lambda, API Gateway, DynamoDB, S3, SAM) with an async 202/poll job pattern; Quick-mode answers returned in 6.5 s median on a 20-question eval set.** (32 words)
    - *How does it work?* POST /ask writes a pending job to DynamoDB, fires the worker Lambda asynchronously and returns 202; the client polls GET /ask/{id}. I chose this because the first cold start took ~31 s, past API Gateway's 30 s limit.
 
 2. **Designed a multi-agent Deep mode: a Gemini supervisor plans tasks for market, news and SEC-filings specialists that run in parallel and post to a shared evidence board.** (28 words)
    - *How does it work?* The planner returns structured JSON (companies plus tasks); each specialist is a Gemini function-calling loop (max 3 steps, shared deadline) that writes evidence E1…En; one optional follow-up round fills gaps; the writer must cite [E#]. Simple questions skip the planner via keyword rules, and any outage falls back to Quick mode.
 
-3. **Built a fact-checker that verifies every number against cited evidence; deployed eval: 0 of 112 numbers untraceable, and Quick's citation coverage rose from 44% to 87% vs v1.** (29 words)
-   - *How does it work?* Stage 1 is pure code: extract each number, normalise units and precision ("$57.0B" = "57,006 million"), and match it to the evidence text. Only misses go to one LLM call to judge whether they're derived, and unsupported numbers get flagged in the answer. The 44→87% figure is the 20-question local eval with the same frozen scorer; the 0/112 is the 10-answer deployed subset.
+3. **Built a fact-checker that verifies every number against cited evidence; on a 20-question deployed eval set, 3 of 302 numbers were untraceable and Quick-mode answers cited sources on 91% of numeric lines.** (32 words)
+   - *How does it work?* Stage 1 is pure code: extract each number, normalise units and precision ("$57.0B" = "57,006 million"), and match it to the evidence text. Only misses go to one LLM call to judge whether they're derived, and unsupported numbers get flagged in the answer. 3/302 = Quick 2/161 + Deep 1/141; all three are correct derived dollar changes the code scorer can't trace (§5 caveat 4). 91% is Quick only (Deep 82%; both modes 87%). For comparison if asked: v1's Quick citation coverage was 44% on its 20-question eval with the same frozen scorer.
 
 4. **Ingested latest 10-K, 10-Q and earnings 8-K filings from SEC EDGAR into a 934-chunk FAISS index on S3, with content-hash embedding caching so re-ingests never re-embed unchanged text.** (29 words)
    - *How does it work?* Section-aware chunking (215 words, 36 overlap), Gemini embeddings at 768 dims cached in SQLite by sha256 of model, dimension, task and text. The index is one .npz on S3, loaded once per Lambda container and kept in memory, with an ETag re-check every 5 minutes. Uploads are create-only/If-Match so two writers can't clobber each other.
 
 Optional 5th, if you have room: **Shipped with 408 mocked unit tests in GitHub Actions CI, a frozen 20-question eval harness, SSM-managed secrets, change-set-reviewed deploys and a $1 budget alarm.** (27 words). *How?* moto for AWS, no network in tests; the scorer is a byte-identical port of v1's, so v1 and v2 are scored the same way.
 
-### (b) Template for after the full deployed eval (I4)
+### (b) Template for after the full deployed eval (filled, 2026-11-12)
 
-Bullets 1, 2 and 4 stay as in (a). Replace bullet 3, and optionally extend bullet 1, once the full 20-question deployed run is in `docs/eval/v2-results.md`:
-
-3'. **Built a code-based fact-checker that verifies every number against cited evidence; on a 20-question deployed eval, [U_quick+U_deep]/[N] numbers were untraceable and [C_quick]% of numeric lines cited sources.** (≈29 words)
-   - Fill from the Deployed table: "Numbers not traceable" (Quick + Deep) and "Lines with numbers that carry a citation" (Quick). Only quote "vs v1 [3/105]" if the run is on all 20 questions.
-
-1'. …**Quick answers in [P50_QUICK] s and multi-agent Deep answers in [P50_DEEP] s median across 20 deployed eval questions.** (replace the last clause of bullet 1)
-
-Optional: **Cut Deep-mode Gemini calls per answer from 8.3 (v1) to [CALLS_DEEP] on the deployed eval** (only if the full-run number is lower; the local figure today is 6.2).
+The full deployed eval ran on 2026-11-11, and its numbers are now in (a) and §5, so the template is gone. Bullets
+that compare with v1 aren't used.
 
 ### Words to avoid (not supported)
 
@@ -259,14 +259,15 @@ v1 = v1 @ `73b6fda` rerun locally on 2026-11-05 (`docs/eval/v1-baseline.md`).
 
 ### Resume bullet options (only these numbers)
 
-1. **Evaluated v2 against v1 on a 20-question benchmark with a frozen code-based scorer; deployed answers cited sources
-   on 91% of numeric lines (v1: 44%), with 1% untraceable numbers.** (29 words)
+1. **Built a code-based evaluation for a 20-question eval set with a frozen scorer and no LLM judge; Quick-mode
+   answers cited sources on 91% of numeric lines, with 1% of numbers untraceable.** (31 words)
    - *How does it work?* Every context item is labelled `[Doc N]` and the prompt requires a citation per number; the
-     scorer is a byte-identical port of v1's, with no LLM judge. The 1% are correct derived dollar changes the code
-     scorer can't trace.
+     scorer is a byte-identical port of v1's, with no LLM judge. 91% is Quick only (Deep 82%; both modes 253/291 =
+     87%). The 1% is Quick's 2/161; both modes together are 3/302, all correct derived dollar changes the code scorer
+     can't trace. v1, for comparison if asked: 44% Quick citation coverage, same scorer.
 2. **Designed a multi-agent research mode: a Gemini supervisor orchestrates parallel market, news and SEC-filings
-   agents, with a single-agent fast path for simple questions; 90% of answers returned within 21 seconds on a
-   20-question eval set.** (35 words)
+   agents, with a single-agent fast path for simple questions; 90% of Deep-mode answers returned within 21 seconds
+   on a 20-question eval set.** (36 words)
    - *How does it work?* A Gemini supervisor plans multi-part questions into tasks (`core/agents/supervisor.py`);
      the specialists run in parallel in a thread pool under a shared deadline (`core/agents/deep.py:79-84`).
      Single-intent, single-company questions skip the planner and go to one specialist
@@ -275,7 +276,10 @@ v1 = v1 @ `73b6fda` rerun locally on 2026-11-05 (`docs/eval/v1-baseline.md`).
      (full)", 2026-11-09/11). p90 = 20.3 s, so 18 of 20 answered in 20.3 s or less. Times are measured on the
      client from `POST /ask` to the poll that returns `done`, so they include network and up to 2 s of polling.
      Under 20 s it is 17 of 20 (85%), so don't say "20 seconds".
-   - *If asked about the multi-agent path only:* 10 of the 20 took the fast path (s1–s6, f1–f4) and 10 ran the full
-     planner pipeline (c1–c6, w1–w4). The full-pipeline 10 alone: **median 16.6 s, p90 21.8 s, 6.0 Gemini calls per
-     answer**, 0 untraceable numbers out of 69, citations on 72% of numeric lines. The fast-path 10: median 12.0 s,
-     p90 19.6 s, 3.3 calls. None of the 20 fell back to Quick, and none needed a 2nd round.
+   - *The 21 s is for Deep mode, not for multi-agent answers.* 10 of the 20 took the fast path (s1–s6, f1–f4) and 10
+     ran the full planner pipeline (c1–c6, w1–w4). The full-pipeline 10 alone: **median 16.6 s, p90 21.8 s, 6.0
+     Gemini calls per answer**, 0 untraceable numbers out of 69, citations on 72% of numeric lines. The fast-path 10:
+     median 12.0 s, p90 19.6 s, 3.3 calls. None of the 20 fell back to Quick, and none needed a 2nd round.
+   - *If asked how many answers used several agents:* 4 of 20 ran 2+ specialists in parallel (w1 12.8 s, w2 13.6 s,
+     c5 21.8 s, w4 25.3 s), so 2 of those 4 took over 21 s. For the other 6 full-pipeline answers the planner chose
+     one specialist. The brief's 3-company query ran market, news and filings in parallel in 15.81 s (PROGRESS I2 D).
