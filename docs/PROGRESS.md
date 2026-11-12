@@ -102,10 +102,19 @@ Written by the Builder. One row per task; newest phase first.
   - Re-rendered with `--report-only --note …` (no Gemini calls). Scorer untouched (D8).
 - Gemini this session: A 15 + C 2 + D 13 + E 33 = **63 generation calls**. No 429 / RESOURCE_EXHAUSTED. One 503
   (in A), answered by the next model.
+- **Known limitations (review I2, 2026-11-12):**
+  - The prompt-ban test (`tests/unit/test_deep_v2.py`, `test_filings_prompt_reports_the_latest_period…`) covers
+    only the three texts I2 changed (filings prompt, market prompt, `get_quotes` description). It is
+    case-sensitive and bans only Q3 / FY2027 as periods. It doesn't check the news or supervisor prompts or the
+    other tool declarations, where two older examples remain: "e.g. NVDA" (`core/agents/tools.py:30`) and
+    "Q3 FY26" (`core/agents/supervisor.py:55`). **Deferred to I3.**
+  - Cold start on the new image `f92da023`: 1 cold invoke per function (API init 1975 ms, worker init 3761 ms,
+    step C). That's accepted because I2 changed prompts only, not imports or dependencies, and the earlier image
+    has 3+ cold measurements per function (API 1.4–1.6 s ×5, worker 2.6–2.9 s ×4, 11-09 logs).
 
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
-  `https://7c2tczydl3.execute-api.ap-southeast-2.amazonaws.com`, bucket `research-desk-databucket-dddxpuze63yn`,
+  `<API_URL>`, bucket `<DATA_BUCKET>`,
   table `research-desk-Table-PPKATV744XD2`. SNS budget-alert subscription confirmed. The six secrets are in SSM under `/research-desk/`.
 - `python -m scripts.bootstrap --skip secrets` → `index: uploaded 934 chunks to s3://…/vectors/index.npz
   (ETag "c5d499974602f4835d1d7ad0532b3fe3")`, `watchlist: seeded NVDA, AMD, INTC`.
