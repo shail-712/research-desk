@@ -188,3 +188,5 @@ v1 = same-config rerun on 2026-11-05 (`docs/eval/v1-baseline.md`, D14). Same fro
 | f3 | filing | What are NVIDIA's main business segments and how did they perform? | 0/13, 5.7 s | 0/16, 10.25 s, ok |
 | f4 | filing | How much did AMD spend on research and development? | 0/7, 6.42 s | 0/13, 20.3 s, ok |
 <!-- /section:api -->
+
+**What the Deep column above is made of (from each answer's trace, 2026-11-12):** 0 of the 20 Deep answers fell back to Quick; 10 took the single-agent keyword fast path with no planner call (s1–s6, f1–f4); 10 ran the full planner pipeline (c1–c6, w1–w4), and none of those reached a 2nd round. The full-pipeline 10 alone score untraceable 0/69, routing 90%, citations 72%, p50 16.6 s, p90 21.8 s, 6.0 Gemini calls; the fast-path 10 score 1/72, 100%, 93%, 12.0 s, 19.6 s, 3.3 calls.

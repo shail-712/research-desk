@@ -153,3 +153,20 @@ Append-only. Format: decision · options considered · why · trade-off. D1–D7
   stack command, the Postman base URL and the bootstrap default. Moto tests keep `ap-south-1` (it has no effect).
 - **Trade-off:** higher network latency from India than `ap-south-1` (not measured; small next to LLM time). Gemini, SEC and market-data calls are not
   affected. The Region can't be changed without a different account.
+
+## D18. The eval runner retries answers cut short by the Gemini quota (2026-11-11)
+- **Context:** on a rerun, `evals/run.py` used to skip any saved result with a non-empty `answer`. A Deep answer
+  that hits the Gemini quota doesn't fail: it falls back to Quick or loses a specialist, so it still has an answer
+  and would have been kept and scored as if it were a normal Deep answer.
+- **Options:** keep every answered result; drop quota-hit answers from the report; retry them.
+- **Decision:** a saved result whose `error`, `notice` or `trace` contains `HTTP 429` or `RESOURCE_EXHAUSTED`
+  (`quota_hit`) no longer counts as done (`is_complete`), so the same command asks that question again. Other
+  failures are not retried: a fallback caused by a 503 (model overloaded) is real behaviour and is scored as a
+  fallback. Test: `test_rerun_retries_answers_cut_short_by_the_quota`.
+- **Why:** a quota hit is a limit of the free API key, not of the app. Scoring it would mix "Deep ran out of
+  quota" into "how good is Deep". The final deployed run (2026-11-11) has 0 of 40 answers with a quota sign.
+- **D8 is not affected:** the change only decides which answers the runner fetches again before scoring.
+  `evals/scoring.py` and `core/numbers.py` are unchanged, the scorer reads the same keys from each result, and
+  the golden test still reproduces v1's summary. Re-scoring the saved 20 Deep answers gives the published numbers.
+- **Trade-off:** the eval does not measure how the app behaves when the quota runs out (that path is covered by
+  unit tests only). How many answers were retried during the run was not recorded.

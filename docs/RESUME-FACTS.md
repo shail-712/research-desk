@@ -264,8 +264,18 @@ v1 = v1 @ `73b6fda` rerun locally on 2026-11-05 (`docs/eval/v1-baseline.md`).
    - *How does it work?* Every context item is labelled `[Doc N]` and the prompt requires a citation per number; the
      scorer is a byte-identical port of v1's, with no LLM judge. The 1% are correct derived dollar changes the code
      scorer can't trace.
-2. **Cut multi-agent Deep-mode Gemini calls per answer from 8.3 to 4.7 and p90 latency from 47 s to 20 s versus v1,
-   while answering all 40 deployed eval questions without fallback.** (29 words)
-   - *How does it work?* A keyword fast path skips the planner for simple questions; specialists batch parallel tool
-     calls in one step under a shared deadline; the checker's code stage clears most numbers without an LLM call. The
-     v1 latency was measured locally and v2's on AWS, which only makes v2's number harder to hit.
+2. **Designed a multi-agent research mode: a Gemini supervisor orchestrates parallel market, news and SEC-filings
+   agents, with a single-agent fast path for simple questions; 90% of answers returned within 21 seconds on a
+   20-question eval set.** (35 words)
+   - *How does it work?* A Gemini supervisor plans multi-part questions into tasks (`core/agents/supervisor.py`);
+     the specialists run in parallel in a thread pool under a shared deadline (`core/agents/deep.py:79-84`).
+     Single-intent, single-company questions skip the planner and go to one specialist
+     (`core/agents/deep.py:118-121`). The checker's code stage clears most numbers without an LLM call.
+   - *Where "90% within 21 s" comes from:* the 20 Deep-mode answers of the deployed eval set (v2-results "Deployed
+     (full)", 2026-11-09/11). p90 = 20.3 s, so 18 of 20 answered in 20.3 s or less. Times are measured on the
+     client from `POST /ask` to the poll that returns `done`, so they include network and up to 2 s of polling.
+     Under 20 s it is 17 of 20 (85%), so don't say "20 seconds".
+   - *If asked about the multi-agent path only:* 10 of the 20 took the fast path (s1–s6, f1–f4) and 10 ran the full
+     planner pipeline (c1–c6, w1–w4). The full-pipeline 10 alone: **median 16.6 s, p90 21.8 s, 6.0 Gemini calls per
+     answer**, 0 untraceable numbers out of 69, citations on 72% of numeric lines. The fast-path 10: median 12.0 s,
+     p90 19.6 s, 3.3 calls. None of the 20 fell back to Quick, and none needed a 2nd round.
