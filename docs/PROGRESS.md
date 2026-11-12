@@ -2,8 +2,24 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## Full deployed eval, brought forward from I4 (branch `iter-2`; 2026-11-11)
+- Image check (read-only): ApiFunction and AskWorker both on `sha256:f92da023…`, stack UPDATE_COMPLETE 2026-11-09.
+  Since `a0f0b37` only a test file and docs changed (not in the image), so no redeploy.
+- Estimate: ~150 Gemini calls from scratch (Quick 20, Deep ~123 local / ~130 at the subset's AWS rate); ~112–120
+  for the 30 answers not yet saved. Actual: **80** new calls.
+- Runner change (`evals/run.py`, scorer untouched, D8): an answer whose error/notice/trace shows `HTTP 429` or
+  `RESOURCE_EXHAUSTED` no longer counts as done, so a quota-hit Deep answer (which falls back to Quick or loses a
+  specialist rather than failing) is retried by the same command. Section renamed "Deployed (full)"; the 11-09
+  subset section is kept above it as a dated block. Test: `test_rerun_retries_answers_cut_short_by_the_quota`.
+- `python -m evals.run --target api --url $url` → **40/40 answered**, no quota hits, no fallbacks. Untraceable 2/161
+  Quick, 1/141 Deep (all three are correct derived dollar changes); citations 91% / 82%; routing 80% / 95% (Deep
+  w3: planner sent news only); p50 6.5 s / 13.2 s, p90 10.4 s / 20.3 s; calls 1.0 / 4.7. Report re-rendered with
+  `--report-only --note …`. Resume write-up: `docs/RESUME-FACTS.md` §5.
+
 ## I2 — Deep mode on AWS (branch `iter-2`; 2026-11-09)
-- README: warm Quick on AWS ~6 s (NVDA P/E + news: market 3.9 s, news 1.8 s, Gemini 1.8 s; your measurement).
+- README latency: the ~6 s NVDA P/E + news run (job `25cc5783`) was a **cold** worker (Init Duration 2920 ms), not
+  warm (review I2, finding 3). README now cites the measured numbers from steps C and E below: Quick p50 5.8 s on
+  AWS (eval subset), warm ~6.6 s (4.0 s of work), cold ~10 s (3.8 s worker init).
 - **Check 1, Deep `/ask` with the brief's query (you ran it; result read from `%TEMP%\deep-brief.json`):** `done`,
   17.57 s, 10 Gemini calls, no fallback, not partial. Plan: NVDA, AMD, INTC; round 1 = filings 7.15 s (2 calls,
   4 findings, 2 gaps), news 6.91 s (2, 5, 1), market 11.45 s (3, 3, 1). No round 2 (the follow-up call returned no
@@ -26,28 +42,79 @@ Written by the Builder. One row per task; newest phase first.
   independent searches together in one step; if the period is missing, search again for the latest results
   without naming a period. If the next local run still omits NVIDIA's latest-quarter revenue, it is accepted as
   a known limitation and we redeploy.
-- Remaining steps are in `docs/I2-RUNBOOK.md` (A–E, with the Gemini quota plan). Results go below.
-- **A. Local Deep check (round-2 prompt):** `<date>`, `<total> s`, `<calls>` calls. Latest-quarter revenue
-  finding: `<yes: quote / no: known limitation>`. "Not filed yet" gap: `<yes/no>`. Customer concentration: `<yes/no>`.
-- **B. Redeploy:** change set `<Modify ApiFunction, Modify AskWorkerFunction, Replacement False>`;
-  `UPDATE_COMPLETE` at `<time UTC>`. Pushed image `<bytes>` (ECR, compressed); local 1.27 GB.
-- **C. Cold start (first ask after the redeploy) vs warm**, question = demo query 2:
-  | | Cold | Warm |
+- Runbook `docs/I2-RUNBOOK.md` run by the Builder on 2026-11-10 (your rule change: Builder runs AWS + Gemini steps).
+- **A. Local Deep check (round-2 prompt): PASS.** 57.44 s, 15 Gemini calls, no fallback. Filings sent its searches
+  in parallel (3× `latest_filing`, then 4× `search_filings`, one topic each). Finding: "NVDA: Revenue for the
+  second quarter of fiscal year 2027 (ended July 26, 2026) was $96.2 billion, up 106% year-over-year [E41, E42]".
+  Gap: "The requested Q3 period is not yet filed." Customer concentration (16%, Q2 FY27) kept. The answer uses all
+  three ("Q3 data is not yet filed; Q2 FY27 revenue was $96.2B, up 106% year-over-year [E41]"). Market: `get_quote`
+  ×3 only. Checker 11/11. Cost drivers: one Gemini 503 (14.9 s before the next model answered) and a round-2 market
+  follow-up (1 call).
+- **B, first attempt (2026-11-09 18:3x UTC): held.** B1 `sam build` succeeded. B2's change set had a third row,
+  Modify `HttpApi` (`Properties.Body`, `Evaluation: Dynamic`, `CausingEntity: ApiFunction.Arn`, Replacement False).
+  The OpenAPI body references the function ARN, so CloudFormation re-evaluates it whenever the function changes.
+  The rule then was "exactly 2 rows", so that change set was deleted, not executed.
+- **B, second attempt: DONE.** You extended the rule: accept `HttpApi` only as Modify / Replacement False with
+  every detail `CausingEntity` ApiFunction(.Arn) and `Evaluation: Dynamic`.
+  - No rebuild. The local image `f92da0233572` was already the pushed one, every layer "already exists", and
+    ECR stayed at 2 images.
+  - Details printed: both functions change only `Properties.Code` (Static); `HttpApi` changes only `Body`
+    (Dynamic, from `ApiFunction.Arn`). `EnableWatchdog=false`, `AlertEmail` set. Safety check passed.
+  - B3: `UPDATE_COMPLETE` 2026-11-09 19:07:58 UTC. Both functions `Successful` on
+    `sha256:f92da0233572873013d87136fa13923ec8a26529b02a18139a4be5e3744ef928`.
+- **B4. Image:** 300,932,386 bytes in ECR (compressed); 1.27 GB local. ECR holds 2 images (11-07 and this one).
+- **C. Cold start vs warm** (demo query 2, "What is AMD's market cap and P/E ratio, and the latest headlines?";
+  C1 sent right after B3 with no API call in between; CloudWatch REPORT lines, read-only):
+  | | Cold (19:09:11 UTC) | Warm (19:09:42 UTC) |
   |---|---|---|
-  | ApiFunction Init Duration | `<ms>` | — |
-  | AskWorker Init Duration / INIT_REPORT timeout? | `<ms / yes-no>` | — |
-  | Tools (market, news) | `<s>` | `<s>` |
-  | Gemini | `<s>` | `<s>` |
-  | 202 → done | `<s>` | `<s>` |
-  I1 baseline (new image, first ever start): AskWorker init timed out at 10 s, then ~3.7 s; 202 → done ~31.5 s.
-- **D. Brief's Deep query on AWS (after the fix):** `<status>`, `<total> s`, `<calls>` calls, fallback `<none>`,
-  checker `<x/y>`, `<n>` E# citations. Compared with check 1 (17.57 s, 10 calls): `<notes>`.
-- **E. Eval subset** (s1 c1 c4 f3 w1, both modes): `<complete / PARTIAL n of 10>`. Deployed section of
-  `docs/eval/v2-results.md`: `<headline numbers>`. Calls used: `<n>`.
+  | ApiFunction Init Duration | 1975 ms (first POST: 344 ms + init) | — (5–75 ms per call) |
+  | AskWorker Init Duration | 3761 ms, **no INIT_REPORT timeout** | — |
+  | AskWorker Duration | 5832 ms (billed 9594 ms incl. init) | 4027 ms |
+  | Tools: market:AMD / news:AMD | 3.81 s / 1.60 s | 1.89 s / 0.96 s |
+  | Gemini (1 call) | 1.55 s | 2.13 s |
+  | Answer total (in the worker) | 5.72 s | 4.02 s |
+  | 202 → `done` (3 s polling) | ~10.0 s | ~6.6 s |
+  - Both answers: `done`, 6 sources, 1 Gemini call. Max memory 275 MB of 1024.
+  - The I1 10 s init timeout did not come back, even on this newly deployed image. Init was 3.8 s, so no
+    import fix is needed. I1's case (first start of the first image) stays a one-off.
+- **D. Brief's Deep query on AWS (after the fix): done, 15.81 s, 13 Gemini calls**, no fallback, no round 2,
+  checker 9/9, 24 E# citations, 33 sources (20 cited). Job `602ce213…`.
+  - Round 1: filings 11.09 s (4 calls, 7 findings, 1 gap), news 9.39 s (2, 5, 0), market 10.49 s (2 calls,
+    `get_quote` ×3 only: fixed).
+  - Against check 1 (17.57 s, 10 calls): the "Q3 not yet filed; latest is Q2 FY2027" note and the 16%
+    customer concentration are now in the answer.
+  - **NVIDIA's latest-quarter revenue ($96.2B, +106%) is again missing.** For NVDA, filings kept one mixed
+    query ("revenue segment breakdown GPU customers competitive risks"), re-ran it without "Q3", then called
+    `latest_filing`. That gave the period but not the revenue passage.
+  - Step A (local) got it; D (AWS) didn't. The prompt rule is followed only some of the time, so per your
+    decision this is a **known limitation** (DESIGN.md).
+- **E. Eval subset: COMPLETE, 10/10 answered**, 33 Gemini calls (Quick 5 × 1, Deep 3+7+6+7+5 = 28), 143 s wall.
+  - Deployed section of `docs/eval/v2-results.md`:
+    - untraceable numbers 0/65 Quick, 0/47 Deep;
+    - every-number-traces 100% / 100%;
+    - routing 80% / 100%. w1 Quick used `market` only: "Why did AMD stock fall…" has no news keyword, the same
+      keyword-routing limitation as in DESIGN.md. Deep used market + news.
+    - cited numeric lines 87% / 79%;
+    - p50 5.8 s / 11.3 s, p90 6.0 s / 17.6 s;
+    - Gemini calls per question 1.0 / 5.6;
+    - no follow-ups, no fallbacks, no ⚠️unverified.
+  - The section's note says v1's columns cover all 20 questions and v2 only these 5, so compare per question.
+  - Re-rendered with `--report-only --note …` (no Gemini calls). Scorer untouched (D8).
+- Gemini this session: A 15 + C 2 + D 13 + E 33 = **63 generation calls**. No 429 / RESOURCE_EXHAUSTED. One 503
+  (in A), answered by the next model.
+- **Known limitations (review I2, 2026-11-12):**
+  - The prompt-ban test (`tests/unit/test_deep_v2.py`, `test_filings_prompt_reports_the_latest_period…`) covers
+    only the three texts I2 changed (filings prompt, market prompt, `get_quotes` description). It is
+    case-sensitive and bans only Q3 / FY2027 as periods. It doesn't check the news or supervisor prompts or the
+    other tool declarations, where two older examples remain: "e.g. NVDA" (`core/agents/tools.py:30`) and
+    "Q3 FY26" (`core/agents/supervisor.py:55`). **Deferred to I3.**
+  - Cold start on the new image `f92da023`: 1 cold invoke per function (API init 1975 ms, worker init 3761 ms,
+    step C). That's accepted because I2 changed prompts only, not imports or dependencies, and the earlier image
+    has 3+ cold measurements per function (API 1.4–1.6 s ×5, worker 2.6–2.9 s ×4, 11-09 logs).
 
 ## I1 — Minimal deployed slice (branch `iter-1`; 2026-11-07)
 - Stack `research-desk` CREATE_COMPLETE in ap-southeast-2: 14 resources, `EnableWatchdog=false`. Outputs: API
-  `https://7c2tczydl3.execute-api.ap-southeast-2.amazonaws.com`, bucket `research-desk-databucket-dddxpuze63yn`,
+  `<API_URL>`, bucket `<DATA_BUCKET>`,
   table `research-desk-Table-PPKATV744XD2`. SNS budget-alert subscription confirmed. The six secrets are in SSM under `/research-desk/`.
 - `python -m scripts.bootstrap --skip secrets` → `index: uploaded 934 chunks to s3://…/vectors/index.npz
   (ETag "c5d499974602f4835d1d7ad0532b3fe3")`, `watchlist: seeded NVDA, AMD, INTC`.

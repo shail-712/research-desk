@@ -1,5 +1,10 @@
 # I2 runbook — the remaining steps, in order
 
+> **Status 2026-11-10: all steps done by the Builder. Results are in PROGRESS I2.**
+> - The B2 safety rule was extended (your decision): an `HttpApi` row is accepted only as Modify /
+>   Replacement False with every detail `CausingEntity` ApiFunction(.Arn) and `Evaluation: Dynamic`. That row
+>   appears whenever the API function's image changes.
+
 Written by the Builder on 2026-11-09 for you to run. Every step is a hand-off: you run it, paste the
 result back, and the Builder records it in `docs/PROGRESS.md` (I2 section, which has placeholders).
 

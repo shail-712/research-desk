@@ -33,7 +33,7 @@ RESULTS_DIR = ROOT / "evals" / "results"
 REPORT = ROOT / "docs" / "eval" / "v2-results.md"
 V1_BASELINE = ROOT / "docs" / "eval" / "v1-rerun-2026-11-05.json"
 V1_BASELINE_DATE = "2026-11-05"
-SECTIONS = {"local": "Local", "api": "Deployed"}
+SECTIONS = {"local": "Local", "api": "Deployed (full)"}
 API_POLL_SECONDS = 2.0
 API_TIMEOUT_SECONDS = 150
 # Every key the frozen scorer reads from a result (tested by test_eval_run.py's contract test).
@@ -43,6 +43,21 @@ DEEP_TRACE_KEYS = ("rounds", "checker", "fallback")
 
 def results_path(target: str) -> Path:
     return RESULTS_DIR / f"v2-{target}.json"
+
+
+QUOTA_SIGNS = ("HTTP 429", "RESOURCE_EXHAUSTED")
+
+
+def quota_hit(result: dict) -> bool:
+    """True if Gemini's quota ran out during this answer (Deep falls back to Quick or loses a
+    specialist instead of failing, so the answer exists but isn't a fair Deep answer)."""
+    blob = json.dumps({k: result.get(k) for k in ("error", "notice", "trace")}, ensure_ascii=False, default=str)
+    return any(sign in blob for sign in QUOTA_SIGNS)
+
+
+def is_complete(result: dict) -> bool:
+    """Saved and kept on a rerun: answered, and not cut short by the quota (those are retried)."""
+    return bool(result.get("answer")) and not quota_hit(result)
 
 
 def load_results(target: str) -> dict:
@@ -191,7 +206,7 @@ def write_report(target: str, section_md: str, path: Path = REPORT) -> None:
                 "(derived numbers such as growth rates count too, in both versions).\n\n"
                 + SCORER_QUIRKS + "\n\n"
                 "<!-- section:local -->\n## Local\n\n_Not run yet._\n<!-- /section:local -->\n\n"
-                "<!-- section:api -->\n## Deployed\n\n_Not run yet (Phase C)._\n<!-- /section:api -->\n")
+                "<!-- section:api -->\n## Deployed (full)\n\n_Not run yet (Phase C)._\n<!-- /section:api -->\n")
     pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end), re.S)
     text = pattern.sub(lambda _: block, text) if pattern.search(text) else text.rstrip() + "\n\n" + block + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,7 +251,7 @@ def main(argv: list[str] | None = None) -> None:
         for item in items:
             for mode in args.modes:
                 key = f"{item['id']}:{mode}"
-                if key in results and results[key].get("answer") and not args.force:
+                if key in results and is_complete(results[key]) and not args.force:
                     continue
                 print(f"[{key}] {item['q']}", flush=True)
                 if args.target == "api":

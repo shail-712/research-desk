@@ -114,3 +114,18 @@ def test_render_section_compares_with_the_v1_baseline():
                             {"date": "2026-11-05", "answer_dates": "2026-11-05", "models": "m", "kb": "kb"})
     assert "| Right tools/agents used (routing) | 100% | **100%** |" in md
     assert "| single (1) | quick | 0/1 (0%) → 0/1 (0%)" in md
+
+
+def test_rerun_retries_answers_cut_short_by_the_quota():
+    ok = {"answer": "x", "mode": "deep", "trace": {"fallback": None, "rounds": [[{"error": None}]]}}
+    quota_fallback = {"answer": "x", "mode": "quick-fallback",
+                      "trace": {"fallback": "planner unavailable: gemini-3.5-flash: HTTP 429"}}
+    quota_specialist = {"answer": "x", "mode": "deep",
+                        "trace": {"rounds": [[{"agent": "news", "error": "model unavailable (m: HTTP 429)"}]]}}
+    overload_fallback = {"answer": "x", "mode": "quick-fallback",
+                         "trace": {"fallback": "writer unavailable: gemini-3.5-flash: HTTP 503"}}
+    assert run.is_complete(ok)
+    assert not run.is_complete(quota_fallback)
+    assert not run.is_complete(quota_specialist)
+    assert not run.is_complete({"answer": None, "error": "busy"})
+    assert run.is_complete(overload_fallback)  # a 503 fallback is real behaviour, scored as a fallback
