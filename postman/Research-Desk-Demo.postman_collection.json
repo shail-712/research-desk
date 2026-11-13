@@ -1,0 +1,1320 @@
+{
+  "info": {
+    "name": "Research Desk API - Demo",
+    "description": "One-run demo of every deployed feature (docs/example_demo.md). Uses the same Postman environment as Research-Desk.postman_collection.json: base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE, type secret). Run it top to bottom with the Collection Runner or newman: each Ask saves its job_id and jumps to 'Poll job', which polls every 3 s until the job is done, checks that step's trace fields, then jumps to the next Ask. About 22 Gemini calls in total.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "A1 Health (no access code)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"ok is true\", () => pm.expect(pm.response.json()).to.eql({ok: true}));",
+              "pm.collectionVariables.set(\"gemini_calls\", 0);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A2 Missing access code -> 401",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"401 with a JSON error\", () => {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Missing or wrong x-access-code\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A3 Wrong access code -> 401",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "wrong-code-for-the-demo"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"401 with a JSON error\", () => {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Missing or wrong x-access-code\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A4 Body is not JSON -> 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{not json",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 with a JSON error\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Body must be valid JSON\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A5 No question -> 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 with a JSON error\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Missing 'question'\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A6 Unknown mode -> 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What is AMD's stock price?\",\n  \"mode\": \"fast\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 with a JSON error\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error).to.eql(\"'mode' must be one of quick, deep\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A7 Unknown job id -> 404",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask/00000000000000000000000000000000",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask",
+            "00000000000000000000000000000000"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"404 with a JSON error\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Unknown job\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A8 Malformed job id -> 404",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask/not-a-job-id",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask",
+            "not-a-job-id"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"404 with a JSON error\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Not found\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "A9 Wrong method -> 405",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"405 with a JSON error\", () => {",
+              "  pm.response.to.have.status(405);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Method not allowed\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B1 Watchlist",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const tickers = pm.response.json().watchlist.map(w => w.ticker);",
+              "console.log(\"watchlist:\", tickers.join(\", \"));",
+              "pm.test(\"seeded with NVDA, AMD, INTC\", () => pm.expect(tickers).to.include.members([\"NVDA\", \"AMD\", \"INTC\"]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B2 Quotes for the watchlist",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/quotes",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "quotes"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const quotes = Object.values(pm.response.json().quotes);",
+              "quotes.forEach(q => console.log(q.ticker, q.price, q.change_pct + \"%\", q.source, q.trading_date || q.error));",
+              "pm.test(\"each quote has a source and a trading date, or an error\", () =>",
+              "  quotes.forEach(q => pm.expect((q.source && q.trading_date) || q.error).to.be.ok));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B3 Quotes for chosen tickers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/quotes?tickers=NVDA,AMD",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "quotes"
+          ],
+          "query": [
+            {
+              "key": "tickers",
+              "value": "NVDA,AMD"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"exactly NVDA and AMD\", () => pm.expect(Object.keys(pm.response.json().quotes)).to.have.members([\"NVDA\", \"AMD\"]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B4 Invalid ticker -> 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/quotes?tickers=NVDA,N!",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "quotes"
+          ],
+          "query": [
+            {
+              "key": "tickers",
+              "value": "NVDA,N!"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 with a JSON error\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error).to.eql(\"Invalid ticker: 'N!'\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B5 News for NVDA",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/news/NVDA",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "news",
+            "NVDA"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "body.articles.forEach(a => console.log(a.published, \"|\", a.title));",
+              "pm.test(\"ticker and articles\", () => { pm.expect(body.ticker).to.eql(\"NVDA\"); pm.expect(body.articles).to.be.an(\"array\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B6 Alert feed (empty until I3)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/feed?limit=5",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "feed"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "5"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"events is a list\", () => pm.expect(pm.response.json().events).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B7 Add to watchlist by name",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Apple\",\n  \"pct_move\": 2.5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+              "pm.test(\"Apple resolved to AAPL\", () => pm.expect(pm.response.json().added.ticker).to.eql(\"AAPL\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B8 Remove from watchlist",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist/AAPL",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist",
+            "AAPL"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"removed AAPL\", () => pm.expect(pm.response.json().removed).to.eql(\"AAPL\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B9 Remove again -> 404",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/watchlist/AAPL",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "watchlist",
+            "AAPL"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"404 with a JSON error\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().error).to.eql(\"AAPL is not on the watchlist\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Q1 Quick: market only",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What is AMD's stock price?\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"quick-market\");",
+              "pm.collectionVariables.set(\"after_poll\", \"Q2 Quick: news only\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"Q1 Quick: market only\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Q2 Quick: news only",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Any recent news on AMD?\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"quick-news\");",
+              "pm.collectionVariables.set(\"after_poll\", \"Q3 Quick: filings only\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"Q2 Quick: news only\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Q3 Quick: filings only",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What risks does Intel highlight in its filings?\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"quick-filings\");",
+              "pm.collectionVariables.set(\"after_poll\", \"Q4 Quick: no keyword (filings default)\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"Q3 Quick: filings only\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Q4 Quick: no keyword (filings default)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Who are NVIDIA's biggest customers?\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"quick-default\");",
+              "pm.collectionVariables.set(\"after_poll\", \"Q5 Quick: all 3 tools in parallel\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"Q4 Quick: no keyword (filings default)\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Q5 Quick: all 3 tools in parallel",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Compare NVIDIA and AMD stock prices, latest news and revenue\",\n  \"mode\": \"quick\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"quick-all\");",
+              "pm.collectionVariables.set(\"after_poll\", \"D1 Deep: fast path\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"Q5 Quick: all 3 tools in parallel\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "D1 Deep: fast path",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What is NVIDIA's stock price right now?\",\n  \"mode\": \"deep\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"deep-fast\");",
+              "pm.collectionVariables.set(\"after_poll\", \"D2 Deep: planner + specialists + checker\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"D1 Deep: fast path\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "D2 Deep: planner + specialists + checker",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Is AMD's selloff related to its guidance?\",\n  \"mode\": \"deep\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"deep-planner\");",
+              "pm.collectionVariables.set(\"after_poll\", \"D3 Deep: quarter not filed yet\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"D2 Deep: planner + specialists + checker\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "D3 Deep: quarter not filed yet",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"What was NVIDIA's revenue in fiscal Q3 2027?\",\n  \"mode\": \"deep\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+              "const job = pm.response.json();",
+              "pm.test(\"returns a job id, status pending and a poll path\", () => {",
+              "  pm.expect(job.job_id).to.match(/^[0-9a-f]{32}$/);",
+              "  pm.expect(job.status).to.eql(\"pending\");",
+              "  pm.expect(job.poll).to.eql(\"/ask/\" + job.job_id);",
+              "});",
+              "pm.collectionVariables.set(\"job_id\", job.job_id);",
+              "pm.collectionVariables.set(\"expect\", \"deep-unfiled\");",
+              "pm.collectionVariables.set(\"after_poll\", \"\");",
+              "pm.collectionVariables.set(\"polls\", 0);",
+              "pm.collectionVariables.set(\"request_id\", pm.response.headers.get(\"x-request-id\"));",
+              "console.log(\"D3 Deep: quarter not filed yet\", \"job_id\", job.job_id, \"x-request-id\", pm.response.headers.get(\"x-request-id\"));",
+              "postman.setNextRequest(\"Poll job\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Poll job",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-access-code",
+            "value": "{{access_code}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/ask/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "ask",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const polls = Number(pm.collectionVariables.get(\"polls\") || 0);",
+              "if (body.status === \"pending\" && polls < 60) {",
+              "  pm.collectionVariables.set(\"polls\", polls + 1);",
+              "  setTimeout(() => {}, 3000);",
+              "  postman.setNextRequest(pm.info.requestName);",
+              "} else {",
+              "  pm.collectionVariables.set(\"polls\", 0);",
+              "  const expect = pm.collectionVariables.get(\"expect\") || \"\";",
+              "  const t = body.trace || {};",
+              "  const timings = body.timings || {};",
+              "  const tools = (r) => (r.steps || []).filter(s => s.action === \"tool\").map(s => s.tool);",
+              "",
+              "  pm.test(\"job is done (not error)\", () => pm.expect(body.status, body.error).to.eql(\"done\"));",
+              "  pm.test(\"answer and sources\", () => {",
+              "    pm.expect(body.answer).to.be.a(\"string\").and.not.empty;",
+              "    pm.expect(body.sources).to.be.an(\"array\").that.is.not.empty;",
+              "  });",
+              "  pm.test(\"no context unless include_context\", () => pm.expect(body).to.not.have.property(\"context\"));",
+              "  pm.test(\"mode is \" + (expect.startsWith(\"deep\") ? \"deep (no fallback)\" : \"quick\"), () =>",
+              "    pm.expect(body.mode, body.notice).to.eql(expect.startsWith(\"deep\") ? \"deep\" : \"quick\"));",
+              "",
+              "  const checks = {",
+              "    \"quick-market\": () => {",
+              "      pm.test(\"only the market tool ran\", () => pm.expect(body.used_tools).to.eql([\"market\"]));",
+              "      pm.test(\"timing for market:AMD\", () => pm.expect(timings).to.have.property(\"market:AMD\"));",
+              "      pm.test(\"the quote source names its session\", () => {",
+              "        pm.expect(body.sources[0].kind).to.eql(\"market\");",
+              "        pm.expect(body.sources[0].label).to.include(\"session\");",
+              "      });",
+              "      pm.test(\"answer cites [Doc N]\", () => pm.expect(body.answer).to.match(/\\[Doc \\d+\\]/));",
+              "    },",
+              "    \"quick-news\": () => {",
+              "      pm.test(\"only the news tool ran\", () => pm.expect(body.used_tools).to.eql([\"news\"]));",
+              "      pm.test(\"every source is a headline\", () => body.sources.forEach(s => pm.expect(s.kind).to.eql(\"news\")));",
+              "    },",
+              "    \"quick-filings\": () => {",
+              "      pm.test(\"only the filings search ran\", () => pm.expect(body.used_tools).to.eql([\"rag\"]));",
+              "      pm.test(\"sources are filing excerpts\", () => pm.expect(body.sources[0].kind).to.eql(\"document\"));",
+              "      pm.test(\"company is INTC\", () => pm.expect(body.companies.map(c => c.ticker)).to.eql([\"INTC\"]));",
+              "    },",
+              "    \"quick-default\": () => {",
+              "      pm.test(\"no keyword -> filings search only\", () => pm.expect(body.used_tools).to.eql([\"rag\"]));",
+              "      pm.test(\"company is NVDA\", () => pm.expect(body.companies.map(c => c.ticker)).to.eql([\"NVDA\"]));",
+              "    },",
+              "    \"quick-all\": () => {",
+              "      pm.test(\"market, news and filings all ran\", () => pm.expect(body.used_tools).to.have.members([\"market\", \"news\", \"rag\"]));",
+              "      const keys = [\"market:NVDA\", \"market:AMD\", \"news:NVDA\", \"news:AMD\", \"rag\"];",
+              "      pm.test(\"one timing per tool call (5)\", () => keys.forEach(k => pm.expect(timings).to.have.property(k)));",
+              "      const sum = keys.reduce((a, k) => a + (timings[k] || 0), 0);",
+              "      console.log(\"tool seconds summed:\", sum.toFixed(2), \" total - llm:\", (timings.total - timings.llm).toFixed(2));",
+              "      pm.test(\"tools ran in parallel (their summed time > the time before the LLM call)\", () =>",
+              "        pm.expect(sum).to.be.above(timings.total - timings.llm));",
+              "    },",
+              "    \"deep-fast\": () => {",
+              "      pm.test(\"fast path taken (no planner call)\", () => pm.expect(t.fast_path).to.eql(true));",
+              "      pm.test(\"one market task, one round\", () => {",
+              "        pm.expect(t.plan.tasks.map(x => x.agent)).to.eql([\"market\"]);",
+              "        pm.expect(t.rounds).to.have.lengthOf(1);",
+              "      });",
+              "      pm.test(\"answer cites evidence [E#]\", () => pm.expect(body.answer).to.match(/\\bE\\d+\\b/));",
+              "      pm.test(\"checker ran\", () => pm.expect(t.checker.numbers_checked).to.be.a(\"number\"));",
+              "    },",
+              "    \"deep-planner\": () => {",
+              "      const agents = t.plan.tasks.map(x => x.agent);",
+              "      console.log(\"planned agents:\", agents.join(\", \"), \"| rounds:\", t.rounds.length,",
+              "                  \"| follow_up_agents:\", (t.follow_up_agents || []).join(\", \") || \"none\");",
+              "      t.rounds[0].forEach(r => console.log(\"  round 1\", r.agent, r.seconds + \" s\", \"tools:\", tools(r).join(\", \")));",
+              "      console.log(\"checker:\", JSON.stringify(t.checker));",
+              "      pm.test(\"planner used (not the fast path)\", () => pm.expect(t.fast_path).to.eql(false));",
+              "      pm.test(\"2+ specialists planned\", () => pm.expect(agents.length).to.be.at.least(2));",
+              "      pm.test(\"answer cites evidence [E#] and cited sources are marked\", () => {",
+              "        pm.expect(body.answer).to.match(/\\bE\\d+\\b/);",
+              "        pm.expect(body.sources.some(s => s.cited)).to.eql(true);",
+              "      });",
+              "      pm.test(\"fact-checker result recorded\", () => pm.expect(t.checker.numbers_checked).to.be.a(\"number\"));",
+              "      pm.test(\"unsupported numbers are marked in the answer\", () => {",
+              "        if ((t.checker.unsupported || []).length) pm.expect(body.answer).to.include(\"unverified\");",
+              "      });",
+              "    },",
+              "    \"deep-unfiled\": () => {",
+              "      const r = t.rounds[0][0];",
+              "      console.log(\"filings tools:\", tools(r).join(\", \"), \"| gaps:\", JSON.stringify(r.gaps));",
+              "      r.findings.forEach(f => console.log(\"  finding:\", f.claim));",
+              "      pm.test(\"fast path to the filings specialist\", () => {",
+              "        pm.expect(t.fast_path).to.eql(true);",
+              "        pm.expect(t.plan.tasks[0].agent).to.eql(\"filings\");",
+              "      });",
+              "      pm.test(\"filings specialist reports a gap (expected: Q3 FY2027 not filed yet)\", () =>",
+              "        pm.expect(r.gaps).to.be.an(\"array\").that.is.not.empty);",
+              "      pm.test(\"and still reports the latest period it found\", () => pm.expect(r.findings).to.not.be.empty);",
+              "    },",
+              "  };",
+              "  if (checks[expect]) checks[expect]();",
+              "",
+              "  const calls = Number(timings.llm_calls || 0);",
+              "  const total = Number(pm.collectionVariables.get(\"gemini_calls\") || 0) + calls;",
+              "  pm.collectionVariables.set(\"gemini_calls\", total);",
+              "  console.log(expect, \"done:\", timings.total + \" s,\", calls, \"Gemini calls; running total\", total);",
+              "  postman.setNextRequest(pm.collectionVariables.get(\"after_poll\") || null);",
+              "}"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "job_id",
+      "value": ""
+    },
+    {
+      "key": "expect",
+      "value": ""
+    },
+    {
+      "key": "after_poll",
+      "value": ""
+    },
+    {
+      "key": "polls",
+      "value": "0"
+    },
+    {
+      "key": "request_id",
+      "value": ""
+    },
+    {
+      "key": "gemini_calls",
+      "value": "0"
+    }
+  ]
+}

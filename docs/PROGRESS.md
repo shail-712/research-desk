@@ -2,6 +2,61 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I3 — Watchdog on AWS (branch `iter-3`; 2026-11-13)
+- **Telegram (local):** `core.telegram.send(...)` with the `.env` token and chat ID → `sent: True`, 1 attempt, 2.05 s
+  (17:37 UTC). SSM already held the same two values (compared in memory, never printed: "same as .env"), so the
+  "re-run bootstrap" step wasn't needed.
+- **Change set `i3-enable-watchdog`:** built from the deployed template unchanged (same image
+  `f92da0233572`, no rebuild or push, Docker not needed; `template.yaml` unchanged since `a0f0b37`). Parameters:
+  `EnableWatchdog=true`, `AlertEmail` re-passed from the stack, `BudgetLimitUsd` / `SsmPath` previous values.
+  Rows:
+  - **Add (11):** ScanFunction + role + ScanLogs, the ScanFunctionMarketHours schedule + role, NotifyFunction +
+    role + NotifyLogs, the NotifyFunctionNewAlerts stream mapping, NotifyDLQ, FailedAlertsAlarm.
+  - **Modify (1):** Table, Replacement False: the stream is turned on, `Properties.StreamSpecification`, Static.
+  - No Remove, no Replacement. Approved by you.
+  - Executed 17:51:26, `UPDATE_COMPLETE` 17:53:32 UTC.
+  - After the deploy: stream mapping `Enabled` (LATEST, batch 10, on-failure → NotifyDLQ), schedule `ENABLED`,
+    DLQ 0, alarm `INSUFFICIENT_DATA` → `OK`.
+- **Replay test (`aws lambda invoke` ScanFunction `{"replay": "INTC:-7.5"}`, twice): PASS.**
+  - Call 1 (17:54:24, cold, Init 4183 ms): "Scan: 1 price event(s)". The FEED item "INTC -7.5% on Nov 13
+    (replay)" has dedupe `replay:INTC:move_down:2026-11-13`. The "why" took 1 Gemini call and picked a real
+    headline.
+  - Stream → NotifyFunction (17:54:34, cold, Init 2659 ms): "telegram.send ok in 1.05s", "Notify: sent=1
+    failed=0". The item has `notified: True`.
+  - Call 2 (17:54:41): "Already alerted: replay:INTC:move_down:2026-11-13", "Scan: 0 price event(s)".
+  - `GET /feed` → 200 with the alert, its "Demo replay: this move did not happen." label and its "Why".
+  - Two invokes → **one FEED item, one Telegram message**.
+- **Failure → DLQ → alarm → purge → OK: PASS.**
+  - `{"replay": "INTC:-7.5", "fail_delivery": true}` at 17:55:35 created a second FEED item (dedupe key
+    `…:fail`, 1 Gemini call).
+  - NotifyFunction reported it failed 4 times in 1.4 s, the first try plus 3 retries: "marked fail_delivery
+    (demo)", "Notify: sent=0 failed=1".
+  - DLQ: 1 message, `condition: RetryAttemptsExhausted`, `approximateInvokeCount: 4`, the same request ID as the
+    notify log. It was read with `--visibility-timeout 0`, so the message wasn't hidden.
+  - FailedAlertsAlarm `OK` → **`ALARM` 17:58:58 UTC** (alarm history). Alarm history: "Successfully executed action" on
+    AlarmTopic; the email subscription is confirmed.
+  - `aws sqs purge-queue` at 17:59:44 → DLQ 0 → alarm back to **`OK` 18:02:58 UTC** (alarm history), so real
+    failures email again. The background watcher, polling every 30 s, saw the two states at 17:59:23 and
+    18:03:09 (review I3, finding 6).
+  - The failed item stays in FEED with `notified: False` until its 30-day TTL.
+- **Deviation from this file's I3 task list:** the forced failure used the `fail_delivery` flag of a manual
+  replay invoke, not "a bad token in a test invoke". The flag exists for this test (`aws_lambda/notify.py`:
+  that one item is reported as failed without calling Telegram), and it takes the same path:
+  `batchItemFailures` → 3 retries → DLQ → alarm. The real token in SSM was never changed, so the other
+  alerts kept being delivered during the test.
+- **Real alerts during the tests:** the 18:00 UTC scheduled run (13:00 New York), "Scan: 3 price event(s)". All
+  three were sent and marked `notified: True`. They cost 3 Gemini calls; one 503 from the first model was
+  absorbed by the next.
+  - **NVDA −3.2%:** FEED 18:00:21, Telegram 18:00:22.
+  - **AMD −10.7%:** FEED 18:00:25, Telegram 18:00:26.
+  - **INTC −4.0%:** FEED 18:00:47, Telegram 18:00:48.
+
+  Later runs today dedupe per ticker, direction and day.
+- **Telegram total: 5 messages.** That's the local test, the INTC replay, and the 3 real alerts. The
+  fail_delivery alert was never sent.
+- **Gemini this session: 5 calls** ("why" for the 2 replays and the 3 real alerts).
+- Not done yet: Reviewer (I3), merge to `main`.
+
 ## Full deployed eval, brought forward from I4 (branch `iter-2`; 2026-11-11)
 - Image check (read-only): ApiFunction and AskWorker both on `sha256:f92da023…`, stack UPDATE_COMPLETE 2026-11-09.
   Since `a0f0b37` only a test file and docs changed (not in the image), so no redeploy.
