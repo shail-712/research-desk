@@ -1,0 +1,4 @@
+# Streamlit Community Cloud installs this file (the app's own folder): the UI only speaks HTTP to
+# the API, so it needs no core/ dependencies. Same pins as the root requirements.txt.
+streamlit==1.66.1
+requests==2.33.1

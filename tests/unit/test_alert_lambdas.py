@@ -87,10 +87,36 @@ def test_manual_invoke_runs_any_time_and_dry_run_writes_nothing(scan_fn, market_
     assert out["price_events"] == ["INTC -7.5% on Oct 31 (replay)"] and aws.recent_events() == []
 
 
+AFTER_CLOSE = datetime(2026, 11, 3, 22, 0, tzinfo=timezone.utc)   # Tue 17:00 New York
+
+
 def test_fail_delivery_replay_marks_the_feed_item(scan_fn, market_and_why, aws):
-    scan_fn.handler({"replay": "INTC:-7.5", "fail_delivery": True}, None, now=IN_SESSION)
+    scan_fn.handler({"replay": "INTC:-7.5", "fail_delivery": True}, None, now=AFTER_CLOSE)
     [event] = aws.recent_events()
     assert event["fail_delivery"] is True and event["dedupe_key"].endswith(":fail")
+
+
+@pytest.mark.parametrize("when, refused", [
+    (datetime(2026, 11, 3, 14, 30, tzinfo=timezone.utc), True),    # 9:30 EST: the open
+    (IN_SESSION, True),                                            # 13:00
+    (datetime(2026, 11, 3, 21, 0, tzinfo=timezone.utc), True),     # 16:00: the close run
+    (datetime(2026, 11, 3, 14, 15, tzinfo=timezone.utc), False),   # 9:15: before the open
+    (AFTER_CLOSE, False),                                          # 17:00
+    (datetime(2026, 10, 31, 15, 0, tzinfo=timezone.utc), False),   # Saturday
+])
+def test_fail_delivery_is_refused_during_the_session(scan_fn, market_and_why, aws, when, refused):
+    gq, why = market_and_why
+    out = scan_fn.handler({"replay": "INTC:-7.5", "fail_delivery": True}, None, now=when)
+    assert ("refused" in out) is refused
+    if refused:  # nothing scanned, nothing written, no Gemini call
+        assert aws.recent_events() == [] and not gq.called and not why.called
+    else:
+        assert [e["dedupe_key"] for e in aws.recent_events()][0].endswith(":fail")
+
+
+def test_a_normal_replay_still_runs_during_the_session(scan_fn, market_and_why, aws):
+    out = scan_fn.handler({"replay": "INTC:-7.5"}, None, now=IN_SESSION)
+    assert "refused" not in out and out["price_events"] == ["INTC -7.5% on Nov 03 (replay)"]
 
 
 # ── NotifyFunction ──
@@ -193,7 +219,12 @@ def test_scheduler_runs_in_new_york_time_and_tags_its_runs(template):
 
 def test_stream_filter_dlq_and_alarm_are_wired(template):
     res = template["Resources"]
-    event = res["NotifyFunction"]["Properties"]["Events"]["NewAlerts"]["Properties"]
+    mapping = res["NotifyFunctionNewAlerts"]   # declared directly since I4 (review I3, finding 4)
+    assert mapping["Type"] == "AWS::Lambda::EventSourceMapping" and mapping["Condition"] == "WatchdogEnabled"
+    event = mapping["Properties"]
+    assert event["FunctionName"] == {"!Ref": "NotifyFunction"}
+    assert event["EventSourceArn"] == {"!GetAtt": "Table.StreamArn"}
+    assert (event["StartingPosition"], event["BatchSize"], event["MaximumRecordAgeInSeconds"]) == ("LATEST", 10, 3600)
     pattern = json.loads(event["FilterCriteria"]["Filters"][0]["Pattern"])
     assert pattern == {"eventName": ["INSERT"], "dynamodb": {"NewImage": {"pk": {"S": ["FEED"]}}}}
     assert event["FunctionResponseTypes"] == ["ReportBatchItemFailures"]
@@ -205,5 +236,5 @@ def test_stream_filter_dlq_and_alarm_are_wired(template):
     assert alarm["AlarmActions"] == [{"!Ref": "AlarmTopic"}]
     statements = [s for p in res["NotifyFunction"]["Properties"]["Policies"]
                   if isinstance(p, dict) and isinstance(p.get("Statement"), list) for s in p["Statement"]]
-    ddb = [s for s in statements if any(a.startswith("dynamodb:") for a in s["Action"])]
-    assert ddb == [{"Effect": "Allow", "Action": ["dynamodb:UpdateItem"], "Resource": {"!GetAtt": "Table.Arn"}}]
+    on_table = [s for s in statements if s.get("Resource") == {"!GetAtt": "Table.Arn"}]
+    assert on_table == [{"Effect": "Allow", "Action": ["dynamodb:UpdateItem"], "Resource": {"!GetAtt": "Table.Arn"}}]

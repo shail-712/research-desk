@@ -9,7 +9,11 @@ session are dropped here, so DST never needs a second cron. Manual invokes run a
     {"replay": "INTC:-7.5"}               demo replay (PLAN B): one labelled alert, deduped
     {"replay": "INTC:-7.5", "fail_delivery": true}
                                           demo of the failure path: NotifyFunction refuses that
-                                          alert, so it lands in the DLQ and the alarm fires
+                                          alert, so it lands in the DLQ and the alarm fires.
+                                          Refused during the New York session (review I3,
+                                          finding 1): a failed record takes the rest of its
+                                          stream batch to the DLQ, so a real alert written in
+                                          the same poll would never be sent.
 
 Alerts are only WRITTEN here (DynamoDB, transactional dedupe). Delivery is NotifyFunction via
 DynamoDB Streams, so a Telegram outage can't slow or fail the scan.
@@ -46,6 +50,10 @@ def handler(event, context, now: datetime | None = None):
     if event.get("source") == "schedule" and not in_session(now):
         logger.info("Outside the New York session; scheduled run dropped")
         return {"skipped": "outside market hours"}
+    if event.get("fail_delivery") and in_session(now):
+        logger.warning("fail_delivery refused during the New York session (it could take real alerts "
+                       "in the same stream batch to the DLQ); run it outside 9:30-16:00 ET")
+        return {"refused": "fail_delivery only outside market hours (Mon-Fri 9:30-16:00 New York)"}
     summary = scan.run(dry_run=bool(event.get("dry_run")), replay=event.get("replay"),
                        fail_delivery=bool(event.get("fail_delivery")), now=now, notify=False)
     emit_metrics({"ScanSeconds": summary["seconds"], "PriceEvents": len(summary["price_events"])},

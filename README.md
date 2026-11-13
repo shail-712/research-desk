@@ -103,6 +103,19 @@ The Postman collection in `postman/` covers every route. To use it:
 From the command line, run the same collection with newman:
 `npx newman run postman/Research-Desk.postman_collection.json --env-var base_url=... --env-var access_code=...`
 
+## Web UI (Streamlit)
+
+`ui/app.py` is a client of the deployed API only. It lets you ask in Quick or Deep mode and shows the
+answer with its sources and trace. It also shows the watchlist with live quotes and the alert feed. It
+reads two Streamlit secrets, `API_URL` (the stack's `ApiUrl` output) and `ACCESS_CODE`, and viewers must
+type the same access code once per session.
+
+- **Locally:** copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (git-ignored), fill in
+  both values, then run `streamlit run ui/app.py` from the repo root.
+- **Streamlit Community Cloud (free):** create an app from this repo with the main file `ui/app.py`; it
+  installs `ui/requirements.txt`. In **Settings → Secrets**, paste the two lines from the example file
+  with the real values.
+
 ## Deploy to AWS
 
 Region `ap-southeast-2` (the only one this account can use, see D17). Needs the
@@ -202,6 +215,7 @@ aws ssm delete-parameters --region $region --names /research-desk/GEMINI_API_KEY
 | `core/` | Agents, tools, LLM client, SEC ingest, vectors, store, market data, news, alerts | all |
 | `aws_lambda/` | Lambda handlers: `api`, `ask_worker` (ask path); `scan`, `notify` (Watchdog) | I1–I3 |
 | `jobs/` | Price-move scan logic, shared by `cli.py scan` and the scan Lambda | I3 |
+| `ui/` | Streamlit frontend: `app.py` and its API client `client.py` (HTTP only, own `requirements.txt`) | I4 |
 | `cli.py` | Local CLI: `quotes`, `market`, `news`, `resolve`, `ingest`, `retriever`, `agent`, `scan` | I0–I5 |
 | `scripts/` | `bootstrap.py`: SSM secrets, create-only index upload, watchlist seed | I1, I3 |
 | `infra/` | `ecr.yaml`: the ECR repository stack, deployed before `sam deploy` (D15) | I1 |

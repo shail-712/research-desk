@@ -147,14 +147,79 @@ def test_index_bucket_is_retained_private_and_encrypted(template):
     assert sse["ServerSideEncryptionByDefault"]["SSEAlgorithm"] in ("AES256", "aws:kms")
 
 
-def test_ssm_read_is_scoped_to_the_secrets_path(template):
-    for name, fn in _functions(template).items():
-        ssm = [s for s in _statements(fn) if "ssm:GetParametersByPath" in s.get("Action", [])]
-        assert ssm, f"{name} can't read its secrets"
-        resources = json.dumps(ssm[0]["Resource"])
-        assert "${SsmPath}" in resources and "parameter/*" not in resources
+SECRETS_PER_FUNCTION = {   # review I3, finding 2: each function reads only what its code uses
+    "ApiFunction": {"APP_ACCESS_CODE", "FINNHUB_API_KEY", "SEC_USER_AGENT"},
+    "AskWorkerFunction": {"GEMINI_API_KEY", "FINNHUB_API_KEY", "SEC_USER_AGENT"},
+    "ScanFunction": {"GEMINI_API_KEY", "FINNHUB_API_KEY"},
+    "NotifyFunction": {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"},
+}
+
+
+def test_each_function_reads_only_its_own_secrets(template):
+    from aws_lambda.runtime import SECRET_NAMES
+
+    assert "GetParametersByPath" not in TEMPLATE_TEXT
+    functions = _functions(template)
+    assert set(functions) == set(SECRETS_PER_FUNCTION)
+    for name, fn in functions.items():
+        env = fn["Properties"]["Environment"]["Variables"]["SSM_SECRETS"]
+        listed = set(env.split(","))
+        assert listed == SECRETS_PER_FUNCTION[name] and listed <= set(SECRET_NAMES), name
+        [ssm] = [s for s in _statements(fn) if s.get("Action") == ["ssm:GetParameters"]]
+        arns = [r["!Sub"] for r in ssm["Resource"]]
+        prefix = "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/"
+        assert all(a.startswith(prefix) for a in arns), name
+        assert {a[len(prefix):] for a in arns} == listed, f"{name}: SSM_SECRETS and IAM differ"
         kms = [s for s in _statements(fn) if s.get("Action") == ["kms:Decrypt"]]
         assert kms and "kms:ViaService" in kms[0]["Condition"]["StringEquals"]
+
+
+def test_scan_has_only_the_dynamodb_actions_it_calls(template):
+    scan = template["Resources"]["ScanFunction"]
+    assert not any(isinstance(p, dict) and "DynamoDBCrudPolicy" in p for p in scan["Properties"]["Policies"])
+    ddb = [s for s in _statements(scan) if any(a.startswith("dynamodb:") for a in s["Action"])]
+    assert ddb == [{"Effect": "Allow", "Action": ["dynamodb:Query", "dynamodb:GetItem", "dynamodb:PutItem"],
+                    "Resource": {"!GetAtt": "Table.Arn"}}]
+
+
+def test_notify_reads_only_this_tables_stream(template):
+    notify = template["Resources"]["NotifyFunction"]["Properties"]
+    assert "Events" not in notify   # a SAM DynamoDB event would attach a stream read on "*"
+    stream = [s for s in _statements(template["Resources"]["NotifyFunction"])
+              if any(a in s["Action"] for a in ("dynamodb:GetRecords", "dynamodb:ListStreams"))]
+    by_resource = {json.dumps(s["Resource"]): sorted(s["Action"]) for s in stream}
+    assert by_resource == {
+        json.dumps({"!GetAtt": "Table.StreamArn"}): ["dynamodb:DescribeStream", "dynamodb:GetRecords",
+                                                     "dynamodb:GetShardIterator"],
+        json.dumps("*"): ["dynamodb:ListStreams"],   # can't be scoped to a resource
+    }
+
+
+def test_error_alarms_email_through_the_alarm_topic(template):
+    res = template["Resources"]
+    expected = {  # name: (threshold, period, evaluation periods)
+        "ApiErrorsAlarm": (2, 300, 1), "WorkerErrorsAlarm": (2, 900, 1), "ScanErrorsAlarm": (1, 900, 2),
+        "AskErrorsAlarm": (3, 900, 1)}
+    for name, (threshold, period, evals) in expected.items():
+        p = res[name]["Properties"]
+        assert res[name]["Type"] == "AWS::CloudWatch::Alarm"
+        assert p["AlarmActions"] == [{"!Ref": "AlarmTopic"}] and p["TreatMissingData"] == "notBreaching"
+        assert (p["Threshold"], p["EvaluationPeriods"]) == (threshold, evals)
+        assert p["ComparisonOperator"] == "GreaterThanOrEqualToThreshold"
+        periods = [m["MetricStat"]["Period"] for m in p["Metrics"] if "MetricStat" in m] if "Metrics" in p \
+            else [p["Period"]]
+        assert set(periods) == {period}, name
+    assert res["ApiErrorsAlarm"]["Properties"]["Dimensions"] == [{"Name": "ApiId", "Value": {"!Ref": "HttpApi"}}]
+    assert res["ApiErrorsAlarm"]["Properties"]["MetricName"] == "5xx"
+    ask = res["AskErrorsAlarm"]["Properties"]["Metrics"]
+    assert {m["MetricStat"]["Metric"]["Dimensions"][0]["Value"] for m in ask if "MetricStat" in m} == {"quick", "deep"}
+    assert [m["Expression"] for m in ask if m.get("ReturnData")] == ["FILL(quick, 0) + FILL(deep, 0)"]
+    for alarm, fn in (("WorkerErrorsAlarm", "AskWorkerFunction"), ("ScanErrorsAlarm", "ScanFunction")):
+        p = res[alarm]["Properties"]
+        assert (p["Namespace"], p["MetricName"]) == ("AWS/Lambda", "Errors")
+        assert p["Dimensions"] == [{"Name": "FunctionName", "Value": {"!Ref": fn}}]
+    assert res["ScanErrorsAlarm"]["Condition"] == "WatchdogEnabled"
+    assert res["ScanErrorsAlarm"]["Properties"]["DatapointsToAlarm"] == 2
 
 
 def test_only_the_worker_reads_the_index_and_it_cannot_write(template):
@@ -185,7 +250,8 @@ def test_functions_use_the_shared_image_and_real_handlers(template):
 
 # ── EnableWatchdog switch (I1 deploys without the price-alert path, I3 adds it) ──
 
-WATCHDOG_ONLY = {"ScanFunction", "NotifyFunction", "NotifyDLQ", "FailedAlertsAlarm", "ScanLogs", "NotifyLogs"}
+WATCHDOG_ONLY = {"ScanFunction", "NotifyFunction", "NotifyDLQ", "FailedAlertsAlarm", "ScanLogs", "NotifyLogs",
+                 "NotifyFunctionNewAlerts", "ScanErrorsAlarm"}
 
 
 def _deployed(template, enable_watchdog: str) -> set[str]:
