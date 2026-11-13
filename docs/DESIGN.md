@@ -76,3 +76,26 @@ description and the market prompt now send valuation questions straight to `get_
   routing score is measured on it.
 - **Production improvement.** When a company is named but no intent word matches, use all three tools.
   Or route with a small classifier call, at the cost of one extra request per question.
+
+### Watchdog: one failed alert can take real alerts in the same stream batch with it (I3, review finding 1)
+- **What.** NotifyFunction reads the table's stream in batches of up to 10 records. When a send fails, it
+  stops at that record and reports it (`batchItemFailures`), so Lambda retries from there
+  (`aws_lambda/notify.py:53-56`). The live mapping allows 3 retries, with batch splitting off. When the retries
+  run out, Lambda sends one DLQ message describing the records from the failed one to the end of the batch,
+  and the shard moves on.
+  - So a real alert in the same batch, behind the failed one, is **never sent**. It stays `notified False`
+    in FEED, and it shows up only inside that one DLQ entry.
+  - The same applies to a `fail_delivery` replay, the DLQ demo. It fails on purpose, so any real alert
+    written in the same poll is lost with it.
+- **What a DLQ entry means.** One message is one failed batch, not one alert. It holds stream metadata (shard,
+  first and last sequence number, arrival time, `RetryAttemptsExhausted`) and covers up to 10 alerts. It
+  doesn't contain the alerts themselves.
+- **Resending is manual.** There is no resend tool. The alerts that weren't delivered are the FEED items with
+  `notified False` (query `pk = FEED`). A `fail_delivery` demo item is one of them by design.
+- **I3 was not affected.** The demo failure was written at 17:55:43 UTC and the real alerts at 18:00, so they
+  weren't in the same batch. All three were sent.
+- **Rule until it's fixed: run `fail_delivery` replays only outside the New York session (Mon–Fri
+  9:30–16:00 ET).** No scheduled scan writes alerts then, so the demo can't share a batch with a real alert.
+- **Fix (I4, `docs/ITERATIONS.md`).** The scan handler refuses `fail_delivery` during the session (with a unit
+  test). Optionally, Notify sends a `fail_delivery` item straight to the DLQ instead of failing the record, so a
+  demo never holds up the batch.

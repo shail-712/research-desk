@@ -90,8 +90,9 @@ The plan from 2026-11-07 on (D16). Older plans are in `docs/archive/` and should
 | `app.py` adapted from v1: API client only, with a Quick/Deep toggle and the trace. 👤 Deploy it on Streamlit Community Cloud. | code |
 | Check that one `request_id` appears in the logs of both API and worker. Add the API 5xx alarm. | code + verify |
 | Full deployed eval (all 20 questions) → Deployed section of `v2-results.md`. | verify |
+| Review I3 findings 1–4, in **one image rebuild and one change set** (👤 approves the change set): **(1)** `aws_lambda/scan.py` refuses `fail_delivery` during the New York session (`in_session()`), with a unit test; optionally, Notify sends `fail_delivery` items straight to the DLQ. **(2)** Each function reads only the SSM secrets it needs: a per-function list of parameter ARNs (`ssm:GetParameters`) in the template, and `aws_lambda/runtime.py` loads only the names in a per-function env var. **(3)** Scan's `DynamoDBCrudPolicy` becomes an explicit statement (Query, GetItem, PutItem, ConditionCheckItem on `Table.Arn`), checked with the moto tests. **(4)** Notify's stream read is limited to `Table.StreamArn` (`ListStreams` stays on `*`). | code + deploy |
 
-**Checks:** the Streamlit URL answers in both modes. `aws logs tail` shows one `request_id` across both functions. The 5xx alarm exists. The eval report covers all 20 questions.
+**Checks:** the Streamlit URL answers in both modes. `aws logs tail` shows one `request_id` across both functions. The 5xx alarm exists. The eval report covers all 20 questions. After the I3 fixes: a `fail_delivery` replay during the session is refused. A replay outside the session still reaches the DLQ and the alarm. Each function's role reads only its own SSM parameters, and IAM shows no `Resource: "*"` stream read.
 
 **Submittable after I4:** a full demo with a UI.
 

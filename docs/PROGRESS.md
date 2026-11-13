@@ -33,10 +33,11 @@ Written by the Builder. One row per task; newest phase first.
     (demo)", "Notify: sent=0 failed=1".
   - DLQ: 1 message, `condition: RetryAttemptsExhausted`, `approximateInvokeCount: 4`, the same request ID as the
     notify log. It was read with `--visibility-timeout 0`, so the message wasn't hidden.
-  - FailedAlertsAlarm `OK` → **`ALARM` 17:59:23 UTC**. Alarm history: "Successfully executed action" on
+  - FailedAlertsAlarm `OK` → **`ALARM` 17:58:58 UTC** (alarm history). Alarm history: "Successfully executed action" on
     AlarmTopic; the email subscription is confirmed.
-  - `aws sqs purge-queue` at 17:59:44 → DLQ 0 → alarm back to **`OK` 18:03:09 UTC**, so real failures email
-    again.
+  - `aws sqs purge-queue` at 17:59:44 → DLQ 0 → alarm back to **`OK` 18:02:58 UTC** (alarm history), so real
+    failures email again. The background watcher, polling every 30 s, saw the two states at 17:59:23 and
+    18:03:09 (review I3, finding 6).
   - The failed item stays in FEED with `notified: False` until its 30-day TTL.
 - **Deviation from this file's I3 task list:** the forced failure used the `fail_delivery` flag of a manual
   replay invoke, not "a bad token in a test invoke". The flag exists for this test (`aws_lambda/notify.py`:
