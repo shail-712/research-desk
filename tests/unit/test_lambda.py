@@ -89,6 +89,35 @@ def test_secrets_load_from_ssm_without_overriding_env(aws_env, monkeypatch, capl
     assert "g-secret-value" not in caplog.text and "GEMINI_API_KEY" in caplog.text  # names only
 
 
+def test_each_function_reads_only_its_own_secrets(aws_env, monkeypatch, caplog):
+    """SSM_SECRETS limits what a container asks SSM for (review I3, finding 2); a missing one is
+    logged by name."""
+    import os
+
+    import boto3
+    from moto import mock_aws
+
+    from aws_lambda import runtime
+
+    for name in runtime.SECRET_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SSM_SECRETS", "TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, NOT_A_SECRET")
+    with mock_aws():
+        ssm = boto3.client("ssm", region_name="ap-south-1")
+        for name in ("GEMINI_API_KEY", "APP_ACCESS_CODE", "TELEGRAM_BOT_TOKEN"):
+            ssm.put_parameter(Name=f"/research-desk/{name}", Value=f"{name}-value", Type="SecureString")
+        asked = []
+        real = ssm.get_parameters
+        monkeypatch.setattr(ssm, "get_parameters", lambda **kw: asked.append(kw["Names"]) or real(**kw))
+        with caplog.at_level("INFO"):
+            loaded = runtime.load_secrets("/research-desk", client=ssm)
+    assert asked == [["/research-desk/TELEGRAM_BOT_TOKEN", "/research-desk/TELEGRAM_CHAT_ID"]]
+    assert loaded == ["TELEGRAM_BOT_TOKEN"]
+    assert "GEMINI_API_KEY" not in os.environ and "APP_ACCESS_CODE" not in os.environ
+    assert "not found in SSM" in caplog.text and "TELEGRAM_CHAT_ID" in caplog.text
+    assert "NOT_A_SECRET" in caplog.text and "-value" not in caplog.text  # names only, never values
+
+
 def test_secrets_loader_rejects_a_non_ssm_path():
     from aws_lambda import runtime
 

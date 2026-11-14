@@ -3,9 +3,10 @@ Cold-start setup shared by every handler.
 
 - Logs: core/log.py JSON lines with the request ID (replaces the Lambda runtime's text handler).
 - Secrets: SecureString parameters under SSM_PREFIX (default /research-desk) are read ONCE per
-  container with GetParametersByPath and exported as environment variables for core/ (which reads
-  os.environ). Nothing secret is in the template or the function configuration, and values are
-  never logged (only the names).
+  container with GetParameters and exported as environment variables for core/ (which reads
+  os.environ). Each function reads only the names in its SSM_SECRETS env var, and IAM allows only
+  those parameters (review I3, finding 2). Nothing secret is in the template or the function
+  configuration, and values are never logged (only the names).
 - Paths: Lambda's filesystem is read-only except /tmp.
 - Metrics: CloudWatch Embedded Metric Format, so a stdout line becomes a metric (no
   PutMetricData calls, no extra latency).
@@ -27,22 +28,39 @@ NAMESPACE = "ResearchDesk"
 _bootstrapped = False
 
 
-def load_secrets(prefix: str | None = None, client=None) -> list[str]:
-    """Exports SSM parameters under `prefix` as env vars (existing env vars win). Returns names loaded."""
+def wanted_secrets() -> list[str]:
+    """The secrets this function reads: SSM_SECRETS (comma-separated), else all of SECRET_NAMES."""
+    raw = os.environ.get("SSM_SECRETS", "").strip()
+    if not raw:
+        return list(SECRET_NAMES)
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    unknown = [n for n in names if n not in SECRET_NAMES]
+    if unknown:
+        logger.warning("SSM_SECRETS has unknown name(s), ignored: %s", ", ".join(unknown))
+    return [n for n in names if n in SECRET_NAMES]
+
+
+def load_secrets(prefix: str | None = None, client=None, names: list[str] | None = None) -> list[str]:
+    """Exports the named SSM parameters under `prefix` as env vars (existing env vars win).
+    Returns the names loaded; names missing in SSM are logged (names only, never values)."""
     import boto3
 
-    path = (prefix or os.environ.get("SSM_PREFIX", "/research-desk")).rstrip("/")  # IAM grants this exact path
+    path = (prefix or os.environ.get("SSM_PREFIX", "/research-desk")).rstrip("/")  # IAM grants these names
     if not path.startswith("/"):
         raise ValueError(f"SSM_PREFIX must start with '/', got {path!r}")
-    client = client or boto3.client("ssm")
+    wanted = [n for n in (names if names is not None else wanted_secrets()) if not os.environ.get(n)]
     loaded = []
-    for page in client.get_paginator("get_parameters_by_path").paginate(
-            Path=path, WithDecryption=True, Recursive=False):
-        for p in page["Parameters"]:
+    if wanted:
+        client = client or boto3.client("ssm")
+        resp = client.get_parameters(Names=[f"{path}/{n}" for n in wanted], WithDecryption=True)
+        for p in resp.get("Parameters", []):
             name = p["Name"][len(path) + 1:]
-            if name in SECRET_NAMES and not os.environ.get(name):
+            if name in wanted:
                 os.environ[name] = p["Value"]
                 loaded.append(name)
+        missing = sorted(set(wanted) - set(loaded))
+        if missing:
+            logger.error("Secret(s) not found in SSM under %s: %s", path, ", ".join(missing))
     logger.info("Loaded %d secret(s) from SSM: %s", len(loaded), ", ".join(sorted(loaded)) or "none")
     return loaded
 

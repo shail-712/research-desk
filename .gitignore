@@ -7,7 +7,7 @@ venv/
 
 # Environment variables (secrets). .env.example is committed.
 .env
-.streamlit/secrets.toml
+**/.streamlit/secrets.toml
 
 # Local caches: SEC ticker list, local SQLite store
 .cache/

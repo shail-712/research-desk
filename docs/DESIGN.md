@@ -77,7 +77,7 @@ description and the market prompt now send valuation questions straight to `get_
 - **Production improvement.** When a company is named but no intent word matches, use all three tools.
   Or route with a small classifier call, at the cost of one extra request per question.
 
-### Watchdog: one failed alert can take real alerts in the same stream batch with it (I3, review finding 1)
+### Watchdog: one failed alert can take real alerts in the same stream batch with it (I3, review finding 1) — demo case fixed in I4
 - **What.** NotifyFunction reads the table's stream in batches of up to 10 records. When a send fails, it
   stops at that record and reports it (`batchItemFailures`), so Lambda retries from there
   (`aws_lambda/notify.py:53-56`). The live mapping allows 3 retries, with batch splitting off. When the retries
@@ -94,8 +94,16 @@ description and the market prompt now send valuation questions straight to `get_
   `notified False` (query `pk = FEED`). A `fail_delivery` demo item is one of them by design.
 - **I3 was not affected.** The demo failure was written at 17:55:43 UTC and the real alerts at 18:00, so they
   weren't in the same batch. All three were sent.
-- **Rule until it's fixed: run `fail_delivery` replays only outside the New York session (Mon–Fri
-  9:30–16:00 ET).** No scheduled scan writes alerts then, so the demo can't share a batch with a real alert.
-- **Fix (I4, `docs/ITERATIONS.md`).** The scan handler refuses `fail_delivery` during the session (with a unit
-  test). Optionally, Notify sends a `fail_delivery` item straight to the DLQ instead of failing the record, so a
-  demo never holds up the batch.
+- **Fixed in I4 (image `cba3f96a644c`, deployed 2026-11-13).** The scan handler refuses `fail_delivery` during
+  the New York session (Mon–Fri 9:30–16:00 ET) before it scans, writes or calls Gemini, and returns
+  `{"refused": …}` (`aws_lambda/scan.py`). Outside the session no scheduled scan writes alerts, so the demo
+  can't share a batch with a real alert. This replaces the I3 rule "run `fail_delivery` only outside market
+  hours", which is now enforced in code.
+  - Unit tests (`tests/unit/test_alert_lambdas.py`): refused at the open, midday and the 16:00 close run;
+    allowed before the open, after the close and on Saturday; a normal replay still runs in session.
+  - Live: refused on Fri 2026-11-13 14:20 ET, with no scan, FEED item or Gemini call. Allowed on Sat
+    2026-11-14 12:40 ET, then DLQ → alarm → purge → OK (PROGRESS, I4).
+  - Not done: the optional change to have Notify send a `fail_delivery` item straight to the DLQ.
+- **Still true for real failures, by design.** If Telegram really rejects an alert after the retries, the
+  rest of that batch goes to the DLQ with it, as described above. Resending stays manual (FEED items with
+  `notified False`). The alarm emails when it happens.

@@ -107,16 +107,21 @@ Resources:
       Environment:
         Variables:
           ASK_WORKER_FUNCTION: !Ref AskWorkerFunction
+          # Each function reads only the secrets it needs (review I3, finding 2). Keep this list and
+          # the ssm:GetParameters resources below the same (test_template.py checks it).
+          SSM_SECRETS: APP_ACCESS_CODE,FINNHUB_API_KEY,SEC_USER_AGENT
       Policies:
         - DynamoDBCrudPolicy: {TableName: !Ref Table}
         - LambdaInvokePolicy: {FunctionName: !Ref AskWorkerFunction}
-        - Statement: &ssmRead
+        - Statement:
             - Effect: Allow
-              Action: [ssm:GetParametersByPath]
+              Action: [ssm:GetParameters]
               Resource:
-                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}"
-                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/*"
-            - Effect: Allow
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/APP_ACCESS_CODE"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/FINNHUB_API_KEY"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/SEC_USER_AGENT"
+            - &kmsDecrypt
+              Effect: Allow
               Action: [kms:Decrypt]          # SecureString with the AWS-managed aws/ssm key
               Resource: "*"
               Condition:
@@ -138,13 +143,23 @@ Resources:
       Timeout: 120                     # Deep mode budget is 75 s
       EventInvokeConfig:
         MaximumRetryAttempts: 0        # the job item records failures; don't rerun long LLM work
+      Environment:
+        Variables:
+          SSM_SECRETS: GEMINI_API_KEY,FINNHUB_API_KEY,SEC_USER_AGENT
       Policies:
         - DynamoDBCrudPolicy: {TableName: !Ref Table}
         - Statement:
             - Effect: Allow            # read-only, and only the index object (HeadObject needs GetObject)
               Action: [s3:GetObject]
               Resource: !Sub "arn:${AWS::Partition}:s3:::${DataBucket}/vectors/*"
-        - Statement: *ssmRead
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParameters]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/GEMINI_API_KEY"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/FINNHUB_API_KEY"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/SEC_USER_AGENT"
+            - *kmsDecrypt
     Metadata: *image
 
   # ── Price alerts: Scheduler -> scan -> DynamoDB -> Stream -> notify -> Telegram ──
@@ -157,9 +172,24 @@ Resources:
       PackageType: Image
       ImageConfig: {Command: ["aws_lambda.scan.handler"]}
       Timeout: 120                     # one batched quote call + at most a few 25 s "why" picks
+      Environment:
+        Variables:
+          SSM_SECRETS: GEMINI_API_KEY,FINNHUB_API_KEY   # quotes + the "why"; no SEC, no Telegram on AWS
       Policies:
-        - DynamoDBCrudPolicy: {TableName: !Ref Table}
-        - Statement: *ssmRead
+        - Statement:
+            # Exactly what the scan path calls (review I3, finding 3): the watchlist (Query), the
+            # dedupe check (GetItem) and the dedupe transaction's two Puts (PutItem). Delivery is
+            # NotifyFunction's job on AWS (notify=False), so no UpdateItem here.
+            - Effect: Allow
+              Action: [dynamodb:Query, dynamodb:GetItem, dynamodb:PutItem]
+              Resource: !GetAtt Table.Arn
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParameters]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/GEMINI_API_KEY"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/FINNHUB_API_KEY"
+            - *kmsDecrypt
       Events:
         MarketHours:
           Type: ScheduleV2
@@ -179,29 +209,51 @@ Resources:
       PackageType: Image
       ImageConfig: {Command: ["aws_lambda.notify.handler"]}
       MemorySize: 512
+      Environment:
+        Variables:
+          SSM_SECRETS: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID
       Policies:
         - Statement:
             - Effect: Allow            # only marks FEED items as notified
               Action: [dynamodb:UpdateItem]
               Resource: !GetAtt Table.Arn
+            # Stream read on this table's stream only (review I3, finding 4). SAM's DynamoDB event
+            # would attach AWSLambdaDynamoDBExecutionRole (stream read on "*"), so the mapping below
+            # is declared directly. ListStreams can't be scoped to a resource.
+            - Effect: Allow
+              Action: [dynamodb:DescribeStream, dynamodb:GetRecords, dynamodb:GetShardIterator]
+              Resource: !GetAtt Table.StreamArn
+            - Effect: Allow
+              Action: [dynamodb:ListStreams]
+              Resource: "*"
         - SQSSendMessagePolicy: {QueueName: !GetAtt NotifyDLQ.QueueName}
-        - Statement: *ssmRead
-      Events:
-        NewAlerts:
-          Type: DynamoDB
-          Properties:
-            Stream: !GetAtt Table.StreamArn
-            StartingPosition: LATEST
-            BatchSize: 10
-            MaximumRetryAttempts: 3
-            MaximumRecordAgeInSeconds: 3600
-            FunctionResponseTypes: [ReportBatchItemFailures]
-            DestinationConfig:
-              OnFailure: {Destination: !GetAtt NotifyDLQ.Arn}
-            FilterCriteria:            # only new alerts reach the function (no invocations for jobs/state)
-              Filters:
-                - Pattern: '{"eventName": ["INSERT"], "dynamodb": {"NewImage": {"pk": {"S": ["FEED"]}}}}'
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParameters]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/TELEGRAM_BOT_TOKEN"
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPath}/TELEGRAM_CHAT_ID"
+            - *kmsDecrypt
     Metadata: *image
+
+  # Stream -> NotifyFunction. Same logical ID and settings as the mapping SAM generated from the old
+  # `Events: NewAlerts` (I3), so CloudFormation updates it in place instead of replacing it.
+  NotifyFunctionNewAlerts:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: WatchdogEnabled
+    Properties:
+      FunctionName: !Ref NotifyFunction
+      EventSourceArn: !GetAtt Table.StreamArn
+      StartingPosition: LATEST
+      BatchSize: 10
+      MaximumRetryAttempts: 3
+      MaximumRecordAgeInSeconds: 3600
+      FunctionResponseTypes: [ReportBatchItemFailures]
+      DestinationConfig:
+        OnFailure: {Destination: !GetAtt NotifyDLQ.Arn}
+      FilterCriteria:                  # only new alerts reach the function (no invocations for jobs/state)
+        Filters:
+          - Pattern: '{"eventName": ["INSERT"], "dynamodb": {"NewImage": {"pk": {"S": ["FEED"]}}}}'
 
   NotifyDLQ:
     Type: AWS::SQS::Queue
@@ -232,6 +284,83 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  # I4. Thresholds are set so one Gemini quota blip never emails: Gemini isn't on the API path, the
+  # worker catches answer failures itself (they are AskErrors, not Lambda Errors), and the scan
+  # never fails over a "why".
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The API returned 5xx at least twice in 5 minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions: [{Name: ApiId, Value: !Ref HttpApi}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  AskErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: At least 3 answers (Quick + Deep) failed in 15 minutes (EMF AskErrors).
+      Metrics:
+        - Id: quick
+          ReturnData: false
+          MetricStat:
+            Metric: {Namespace: ResearchDesk, MetricName: AskErrors, Dimensions: [{Name: Mode, Value: quick}]}
+            Period: 900
+            Stat: Sum
+        - Id: deep
+          ReturnData: false
+          MetricStat:
+            Metric: {Namespace: ResearchDesk, MetricName: AskErrors, Dimensions: [{Name: Mode, Value: deep}]}
+            Period: 900
+            Stat: Sum
+        - Id: total
+          Label: AskErrors, Quick + Deep
+          Expression: FILL(quick, 0) + FILL(deep, 0)
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  WorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The ask worker crashed or timed out at least twice in 15 minutes (Lambda Errors).
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref AskWorkerFunction}]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  ScanErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: WatchdogEnabled
+    Properties:
+      AlarmDescription: The price scan failed in two 15-minute periods in a row (Lambda Errors).
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref ScanFunction}]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopic]
 
