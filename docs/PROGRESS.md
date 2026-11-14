@@ -2,6 +2,97 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I4 — I3 review fixes, error alarms, Streamlit UI (branch `iter-4`; deployed 2026-11-13, tests 2026-11-14)
+- **Code (commit `1bfa31b`, committed by you):**
+  - **(1)** `aws_lambda/scan.py` refuses `fail_delivery` during the New York session.
+  - **(2)** `runtime.load_secrets` reads only the names in `SSM_SECRETS` (`ssm:GetParameters` on those ARNs),
+    and nothing uses `GetParametersByPath` any more:
+
+    | Function | Secrets |
+    |---|---|
+    | API | APP_ACCESS_CODE, FINNHUB_API_KEY, SEC_USER_AGENT |
+    | Worker | GEMINI_API_KEY, FINNHUB_API_KEY, SEC_USER_AGENT |
+    | Scan | GEMINI_API_KEY, FINNHUB_API_KEY (its path never touches SEC; Telegram isn't used on AWS) |
+    | Notify | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID |
+  - **(3)** Scan's DynamoDB access is Query, GetItem and PutItem on the table.
+  - **(4)** Notify's stream mapping is declared directly, with the same logical ID `NotifyFunctionNewAlerts`.
+    Notify reads only `Table.StreamArn`; `ListStreams` stays on `*`.
+  - **Alarms** (all email through AlarmTopic, missing data = OK):
+    - API `5xx` ≥ 2 in 5 min
+    - `AskErrors` (Quick + Deep) ≥ 3 in 15 min
+    - Worker Lambda `Errors` ≥ 2 in 15 min
+    - Scan Lambda `Errors` in 2 consecutive 15-min periods (Watchdog only)
+
+    The thresholds are set so that one Gemini quota blip doesn't email.
+  - **UI:** `ui/app.py` + `ui/client.py` (HTTP only, own `requirements.txt`, viewer gate, secrets from Streamlit).
+  - `python -m pytest` → **431 passed** (408 + 23). `sam validate --lint` → valid.
+- **Before the deploy:**
+  - Rollback prepared: the deployed template was saved; image `f92da023…` stays in ECR (keep-2 drops only the
+    I1 image).
+  - Docker Desktop started; `sam build`; `sam deploy --no-execute-changeset`. The new image is
+    `cba3f96a644c`, with `EnableWatchdog=true` and AlertEmail re-passed from the stack.
+- **Change set: 17 rows, 4 Add, 13 Modify, 0 Remove, 0 Replace.**
+  - **Add:** the 4 alarms.
+  - **Modify:**
+    - the 4 functions (Code + Environment) and their 4 roles
+    - NotifyFunctionRole: ManagedPolicyArns, i.e. `AWSLambdaDynamoDBExecutionRole` removed
+    - NotifyFunctionNewAlerts
+    - `HttpApi`, `ScanFunctionMarketHours` and its role: Dynamic, Never
+    - FailedAlertsAlarm
+  - Two rows I hadn't predicted: FailedAlertsAlarm's description and the stream filter both lose a stray line
+    break left by the I3 deploy. That closes review I3 finding 7; the filter matches the same records.
+- **Telegram token rotated (your decision: during market hours, since all 3 tickers had already alerted down):**
+  - You ran `/revoke` and put the new token in `.env`.
+  - Local test sent with it (19:10 UTC).
+  - Only `/research-desk/TELEGRAM_BOT_TOKEN` was overwritten → **version 2** (19:10:50 UTC), compared with
+    `.env` in memory: same. The other 5 parameters are still version 1.
+  - Nothing reached the DLQ while the live Notify still had the old token.
+- **Executed** 19:13:40 → `UPDATE_COMPLETE` 19:15:45 UTC (2026-11-13). Execution was approved by you.
+- **Secret-load check: PASS.** Each function was woken with a harmless call: `/health`, one Quick `/ask`, a
+  Scan `{"dry_run": true}`, and a Notify `{"Records": []}`. Each logged exactly its own list, with no "not
+  found" errors:
+
+  | Function | "Loaded N secret(s)" | Init Duration |
+  |---|---|---|
+  | API | 3 | 2325 ms |
+  | Worker | 3 | 3850 ms |
+  | Scan | 2 | 3675 ms |
+  | Notify | 2 (the token at v2) | 2431 ms |
+- **newman, demo collection: PASS.** 46 requests (26 steps + 20 polls), **120/120 assertions**, 0 failed,
+  1 min 3 s. The worker log since the deploy shows 9 answers, all `done`, using **18 Gemini calls**: 1 from the
+  secret check, Quick 5 × 1, Deep 3 + 6 + 3.
+- **Replay ×2 with the new token: PASS.**
+  - `{"replay": "NVDA:-7.5"}` at 19:19:53 UTC wrote 1 FEED item.
+  - `telegram.send ok` at 19:20:01 ("Notify: sent=1"), so it was sent with the new token. `notified True`.
+  - The second call logged "Already alerted: replay:NVDA:move_down:2026-11-13". DLQ 0.
+  - It used NVDA because today's INTC replay key had already been used in I3.
+- **`fail_delivery` during the session: REFUSED.** At 14:20 ET (19:20:46 UTC) the scan log shows START →
+  "fail_delivery refused during the New York session" → END: no scan, no Gemini call, no FEED item.
+- **Test A, failure → DLQ → alarm → purge → OK (Sat 2026-11-14, 12:40 ET): PASS.**
+  - `{"replay": "AMD:-7.5", "fail_delivery": true}` at 17:40:42 UTC was **allowed** outside the session and
+    wrote 1 FEED item.
+  - Notify rejected it 4 times between 17:40:56 and 17:40:58, and the DLQ held 1 message.
+  - FailedAlertsAlarm `OK → ALARM` at 17:45:56 UTC (alarm history); "Successfully executed action" on
+    AlarmTopic.
+  - Purge at 17:46:34 → DLQ 0 → `ALARM → OK` at 17:49:56.
+- **Test B, forced-state email (`ApiErrorsAlarm`): PASS.**
+  - `aws cloudwatch set-alarm-state --state-value ALARM` gave `OK → ALARM` at 17:41:32 UTC; "Successfully
+    executed action" on AlarmTopic.
+  - It went back to `OK` by itself at its next evaluation, 17:41:57 (no real 5xx).
+- **End state:** all 5 alarms `OK`, DLQ 0. The AMD `fail_delivery` item stays in FEED with `notified False`
+  until its 30-day TTL. DESIGN marks the batch-failure limitation as fixed for the demo case; real Telegram
+  failures still take their batch to the DLQ, by design.
+- **Cost:**
+  - Gemini: 20 calls (18 above, plus the "why" for the NVDA replay and the AMD `fail_delivery` replay).
+  - Telegram: 2 messages (the new-token local test and the NVDA replay).
+  - Email: 2 alarm emails (Tests A and B).
+- **Not done yet:**
+  - The UI on Streamlit Community Cloud (yours: README "Web UI").
+  - The I4 check "one `request_id` across the API and worker logs".
+  - A live IAM read of the new role policies.
+  - Reviewer (I4), then merge to `main`.
+  - Review I3 finding 5 (`docs/example_demo.md`) is left for I5.
+
 ## I3 — Watchdog on AWS (branch `iter-3`; 2026-11-13)
 - **Telegram (local):** `core.telegram.send(...)` with the `.env` token and chat ID → `sent: True`, 1 attempt, 2.05 s
   (17:37 UTC). SSM already held the same two values (compared in memory, never printed: "same as .env"), so the
