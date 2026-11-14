@@ -86,10 +86,29 @@ Written by the Builder. One row per task; newest phase first.
   - Gemini: 20 calls (18 above, plus the "why" for the NVDA replay and the AMD `fail_delivery` replay).
   - Telegram: 2 messages (the new-token local test and the NVDA replay).
   - Email: 2 alarm emails (Tests A and B).
+- **One `request_id` across the API and worker logs: PASS** (read-only, from the 2026-11-13 runs; 2026-11-14).
+  - The API log has 9 `POST /ask -> 202` lines since the deploy: the secret check plus newman's 5 Quick and
+    3 Deep. All 9 request IDs also appear in the worker log, 6 to 19 lines each.
+  - Example `GyxArhPcSwMEM2g=` (Quick): API `POST /ask -> 202` at 19:16:20.198 → worker "Agent: tools=['market']
+    companies=['AMD']" … "Ask job 9991b9a4… done in 5.6s (1 LLM calls)" at 19:16:30.
+  - Deep `GyxbpgyNSwMEMiw=` (D2): the ID is on the specialists' parallel work, which runs in threads (Gemini
+    calls finishing at 19:19:13.6–14.5, the filings embedding + retrieval, the news fetch), then "Deep answer:
+    5.8s, 6 LLM calls, 12 evidence, checker 11/11 supported" and "Ask job … done".
+- **Live IAM read of the 4 function roles: PASS** (read-only; a scratch script read `list-attached-role-policies`
+  and each inline `get-role-policy`, and checked them against the template).
+  - Every role has only `AWSLambdaBasicExecutionRole` attached; Notify no longer has
+    `AWSLambdaDynamoDBExecutionRole`.
+  - SSM is `ssm:GetParameters` only, on exactly each function's `SSM_SECRETS` names; no `GetParametersByPath`.
+    `kms:Decrypt` only with `kms:ViaService` = SSM.
+  - Scan: `dynamodb:Query/GetItem/PutItem` on the table, nothing else.
+  - Notify: `UpdateItem` on the table; `DescribeStream/GetRecords/GetShardIterator` on this table's stream
+    (`…/stream/2026-11-13T17:51:33.046`); `ListStreams` on `*`; `sqs:SendMessage*` on NotifyDLQ.
+  - No role can read a stream on `*`.
+  - Not changed in I4 (outside review I3's findings): API and Worker still have SAM's `DynamoDBCrudPolicy`
+    (including Scan, DeleteItem and the batch actions, plus `index/*`). They could be narrowed the same way
+    later.
 - **Not done yet:**
   - The UI on Streamlit Community Cloud (yours: README "Web UI").
-  - The I4 check "one `request_id` across the API and worker logs".
-  - A live IAM read of the new role policies.
   - Reviewer (I4), then merge to `main`.
   - Review I3 finding 5 (`docs/example_demo.md`) is left for I5.
 
