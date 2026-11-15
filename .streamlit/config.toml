@@ -1,0 +1,25 @@
+# The Research Desk UI theme (warm beige and brown). Streamlit reads this when the app is started
+# from the repo root: `streamlit run ui/app.py`. Secrets live in secrets.toml (gitignored), not here.
+# Contrast against the beige background (WCAG AA needs 4.5:1): text 12.1, brown accent 5.2,
+# white on brown buttons 5.8, green 5.7, red 5.8, muted grey-brown 6.2.
+
+[theme]
+base = "light"
+backgroundColor = "#F6F0E6"
+secondaryBackgroundColor = "#EBDFCC"
+textColor = "#3B2A1E"
+primaryColor = "#8B5A2B"
+linkColor = "#8B5A2B"
+borderColor = "#D8C7AE"
+font = "sans-serif"
+headingFont = "serif"
+baseRadius = "medium"
+showWidgetBorder = true
+greenColor = "#2E6B34"
+greenTextColor = "#2E6B34"
+redColor = "#A23B2A"
+redTextColor = "#A23B2A"
+grayTextColor = "#6B5544"
+# The replay badge on alerts: Streamlit's default orange text is 2.9:1 on its tint; this is 6.0:1.
+orangeTextColor = "#8A3F0A"
+orangeBackgroundColor = "#F6E3CF"

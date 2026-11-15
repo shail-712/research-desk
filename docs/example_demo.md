@@ -352,8 +352,8 @@ aws cloudwatch set-alarm-state --alarm-name $apiAlarm --state-value ALARM --stat
 Like the replays, this changes state on AWS: it sends one alarm email (the alarms don't email on OK).
 
 **7.4 The web UI.** The same features in a browser: https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/
-(access code once per session). Quick and Deep answers with sources and the Deep trace, the watchlist with
-live quotes, and the alert feed. See the README's "Web UI".
+(access code once per session). Tabs for Ask (Quick and Deep answers with sources and a short trace), the
+Watchlist (live quotes as tiles), Alerts (replays marked) and How it works. See the README's "Web UI".
 
 ---
 

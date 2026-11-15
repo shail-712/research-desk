@@ -213,9 +213,11 @@ market data, the watchlist, the alert feed, Quick routing and Deep mode, each st
 ## Web UI (Streamlit)
 
 Live at https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/. `ui/app.py` is a client of the
-deployed API only. It lets you ask in Quick or Deep mode and shows the
-answer with its sources and trace. It also shows the watchlist with live quotes and the alert feed. It
-reads two Streamlit secrets, `API_URL` (the stack's `ApiUrl` output) and `ACCESS_CODE`, and viewers must
+deployed API only. It has four tabs: **Ask** (Quick or Deep mode; the answer first, then its sources
+grouped by type and a short summary of how it was made, with a "Not covered" box when a company's
+filings aren't indexed), **Watchlist** (live quotes as tiles, re-read every 60 s), **Alerts** (the
+Watchdog's alerts as cards, demo replays marked) and **How it works**. The warm beige/brown theme is in
+`.streamlit/config.toml`; display helpers are in `ui/view.py`. It reads two Streamlit secrets, `API_URL` (the stack's `ApiUrl` output) and `ACCESS_CODE`, and viewers must
 type the same access code once per session.
 
 - **Locally:** copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (git-ignored), fill in
