@@ -99,7 +99,7 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
     no headlines.
   - Routing by keyword costs no LLM call, which is why it's used (D5).
 - **Cold starts and the Gemini free tier.**
-  - The image is 1.27 GB. Worker init is ~2.2–3.9 s, and once, on the first start of a new image, it hit
+  - The image is 1.27 GB. Worker init is ~2.2–4.3 s, and once, on the first start of a new image, it hit
     Lambda's 10 s init limit.
   - Free-tier models return 503/504 under load. Falling back costs time: one Quick job took 39.1 s.
   - The daily quota caps the number of Deep questions. When it runs out, a Deep answer falls back to Quick

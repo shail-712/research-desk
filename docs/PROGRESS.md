@@ -42,6 +42,22 @@ Written by the Builder. One row per task; newest phase first.
   | "What risks does NVIDIA highlight in its SEC filings?" | Quick | 4 s | 1 | No notice. 5 NVIDIA Risk Factors excerpts (10-Q and 10-K), cited. |
 
   Request IDs: `G3-1vjHUSwMEKYg=`, `G3-3Og9ZywMEJfg=`, `G3-5SgrFSwMEJkg=`.
+- **Docs for submission (2026-11-15):**
+  - **README:** a Mermaid architecture diagram (every AWS component of the live 29-resource stack, the data
+    flows and the external services), a Results section (deployed eval, cold starts, cost as a design
+    target), the live UI link, the demo collection, the Watchdog's SSM secrets, how to add a company, and the
+    docs list. The live stack's resource count was read from CloudFormation (29, with 5 alarms).
+    The diagram's rendering wasn't checked with mermaid-cli (that download was blocked here); check it in
+    a Markdown preview or on GitHub.
+  - **`docs/example_demo.md` (review I3 finding 5):** B6 expects Watchdog alerts, as the demo collection's
+    B6 test does since `5ec9fd3`. New part 7: replay → Telegram → feed, the failure path → DLQ → alarm →
+    purge → OK (refused during the session), forcing an alarm's state, and the UI. The checklist and cold-start
+    numbers are updated to the I5 image.
+  - **`docs/DEMO-SCRIPT.md` (new):** the interview run sheet. Checks before the interview, part 1 (15 min) by
+    topic, part 2 (20 min) step by step with measured timings and what to do when a step fails, and likely
+    Q&A questions with pointers into the docs.
+  - DESIGN: worker init range now 2.2–4.3 s (the I5 deploy's 4.3 s). ITERATIONS: the diagram is Mermaid in
+    the README.
 - **Review I4 finding 1 (tests not hermetic): fixed.**
   - `tests/unit/test_ui.py` has an autouse fixture that runs each test from `tmp_path`, points `~` there
     too, and starts from a fresh `st.secrets`. A local `.streamlit/secrets.toml` can no longer leak in.

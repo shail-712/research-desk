@@ -2,11 +2,13 @@
 
 One pass through the deployed API, mostly in Postman, then a read-only look at AWS. Every route, field,
 message and status code below is taken from `aws_lambda/api.py`, `aws_lambda/ask_worker.py`,
-`core/agent.py` and `core/agents/deep.py` (branch `iter-3`, 2026-11-12).
+`core/agent.py` and `core/agents/deep.py` (written on branch `iter-3`, 2026-11-12; Watchdog section and
+expected results updated on `iter-5`, 2026-11-15, image `8bd7e7f6aa84`).
 
 **Cost of one run:** about **22 Gemini calls** (Quick 5 × 1, Deep about 3 + 10 + 4), 3 of the 50 daily Deep
 slots, and about 4 minutes. It writes only 8 job items (they expire after 24 h), the Deep daily counter, and
 AAPL, which is added and then removed from the watchlist. Run the demo once, with Postman **or** newman, not both.
+The Watchdog part (7) adds 1 Gemini call and 1 Telegram message per replay.
 
 ---
 
@@ -18,7 +20,7 @@ AAPL, which is added and then removed from the watchlist. Run the demo once, wit
 3. Open the Postman console (View → Show Postman Console). The demo prints job IDs, request IDs, trace
    summaries and a running Gemini-call total there.
 
-**PowerShell** (needed for the values above, for newman and for part 6). Run from the repo root:
+**PowerShell** (needed for the values above, for newman and for parts 6 and 7). Run from the repo root:
 
 ```powershell
 cd C:\Shail\Projects\research-desk
@@ -57,7 +59,8 @@ All of these only read from AWS.
   ```powershell
   npx newman run postman/Research-Desk-Demo.postman_collection.json --env-var "base_url=$url" --env-var "access_code=$code"
   ```
-  This runs all 27 requests against the deployed API and prints each test result, plus the console lines.
+  This runs the 26 steps against the deployed API, plus Poll job after each Ask (46 requests and 120
+  assertions in the I4 run), and prints each test result, plus the console lines.
   The access code is passed as a variable and isn't printed.
 
 ---
@@ -88,7 +91,7 @@ never a stack trace.
 | B3 | `GET /quotes?tickers=NVDA,AMD` | 200, exactly NVDA and AMD | |
 | B4 | `GET /quotes?tickers=NVDA,N!` | 400 `"Invalid ticker: 'N!'"` | Input validation. |
 | B5 | `GET /news/NVDA` | 200, `ticker`, `articles[]` with `title`, `link`, `published` | |
-| B6 | `GET /feed?limit=5` | 200, `events: []` | Empty until the Watchdog is deployed (I3). |
+| B6 | `GET /feed?limit=5` | 200, 1–5 `events`, newest first, each with `ticker`, `kind`, `title`, `created_at`, `notified` | Alerts written by the Watchdog (part 7), kept 30 days. If the feed is empty, run a replay (7.1) first. |
 | B7 | `POST /watchlist {"name": "Apple", "pct_move": 2.5}` | 201, `added.ticker` = `AAPL` | A company name is resolved to its ticker through the SEC list. |
 | B8 | `DELETE /watchlist/AAPL` | 200 `{"removed": "AAPL"}` | |
 | B9 | `DELETE /watchlist/AAPL` again | 404 `"AAPL is not on the watchlist"` | |
@@ -209,7 +212,7 @@ aws logs tail "/aws/lambda/$api" --since 30m --region $region | Select-String "I
 - **What they do:** Lambda writes a `REPORT` line after every invocation. **Only a cold start** (a new
   container) adds `Init Duration: … ms`.
 - **Expected:** one line per new container, usually on the first request after a quiet spell. Measured on
-  this image: API ~2.0 s, worker ~3.8 s.
+  the I5 image (`8bd7e7f6aa84`): API 2.5 s, worker 4.3 s.
 
 **6.3 The job item in DynamoDB, with its TTL.**
 
@@ -274,7 +277,87 @@ aws logs tail "/aws/lambda/$worker" --since 30m --region $region | Select-String
 
 ---
 
-## 7. Local
+## 7. Watchdog: price alerts, Telegram, the dead-letter queue
+
+**How it works:** EventBridge Scheduler starts the Scan function every 15 minutes, Mon–Fri, in New York time.
+Runs outside the 9:30–16:00 session are dropped. The scan reads the watchlist and the quotes, and for each
+move past the ticker's threshold (default 3%) it writes one alert with a one-line "why" (headlines + 1
+Gemini call). The alert and its dedupe marker go into DynamoDB in one transaction, so each move alerts once
+per day. The table's Stream starts the Notify function, which sends the Telegram message and marks the alert
+`notified`.
+
+A **replay** writes one labelled demo alert ("Demo replay: this move did not happen.") through the same path,
+at any time of day. Each replay ticker works once per day (dedupe key `replay:<TICKER>:move_down:<date>`), so
+pick a ticker not yet replayed today.
+
+Extra PowerShell variables (read-only):
+
+```powershell
+$scan  = aws cloudformation describe-stacks --stack-name research-desk --region $region --query "Stacks[0].Outputs[?OutputKey=='ScanFunctionName'].OutputValue" --output text
+$dlq   = aws cloudformation describe-stacks --stack-name research-desk --region $region --query "Stacks[0].Outputs[?OutputKey=='NotifyDLQUrl'].OutputValue" --output text
+$alarm = aws cloudformation describe-stack-resource --stack-name research-desk --logical-resource-id FailedAlertsAlarm --region $region --query StackResourceDetail.PhysicalResourceId --output text
+```
+
+They read the Scan function's name, the dead-letter queue's URL and the failed-alerts alarm's name.
+
+**7.1 Replay → Telegram → feed.**
+
+```powershell
+Set-Content -Encoding ascii -Path "$env:TEMP\replay.json" -Value '{"replay": "INTC:-7.5"}'
+aws lambda invoke --function-name $scan --region $region --payload "fileb://$env:TEMP\replay.json" "$env:TEMP\scan-out.json"
+Get-Content "$env:TEMP\scan-out.json"
+```
+
+- **`Set-Content`:** writes the event to a file, which avoids PowerShell 5.1 stripping the JSON quotes.
+- **`lambda invoke`:** runs the Scan function once with that event and saves its reply.
+- **Expected:** `StatusCode 200`, and a reply listing 1 price event. Within a few seconds Telegram shows
+  "📉 INTC -7.5% on … (replay)" with its "why" and the label "Demo replay: this move did not happen." Then `GET /feed?limit=5` (B6) or the UI's
+  alert feed shows it first, with `notified: true`.
+- **Run it again:** the reply has 0 price events, and the Scan log says "Already alerted: replay:INTC:…".
+  That's the dedupe.
+
+**7.2 Failure path → DLQ → alarm email → purge → OK.** Run it only **outside the New York session** (Mon–Fri
+9:30–16:00 ET; in IST that's 20:00–02:30 in the US winter, 19:00–01:30 in summer). During the session the Scan function refuses it and returns
+`{"refused": "fail_delivery only outside market hours (Mon-Fri 9:30-16:00 New York)"}`. A failed record takes
+the rest of its stream batch to the DLQ, so a real alert in the same batch would be lost. Wait until a few
+minutes after 16:00 ET: the 16:00 scan can still be running until about 16:02.
+
+```powershell
+Set-Content -Encoding ascii -Path "$env:TEMP\fail.json" -Value '{"replay": "AMD:-7.5", "fail_delivery": true}'
+aws lambda invoke --function-name $scan --region $region --payload "fileb://$env:TEMP\fail.json" "$env:TEMP\scan-out.json"
+aws sqs get-queue-attributes --queue-url $dlq --attribute-names ApproximateNumberOfMessages --region $region
+aws cloudwatch describe-alarms --alarm-names $alarm --region $region --query "MetricAlarms[0].StateValue" --output text
+aws sqs purge-queue --queue-url $dlq --region $region
+aws cloudwatch describe-alarm-history --alarm-name $alarm --history-item-type StateUpdate --max-items 4 --region $region --query "AlarmHistoryItems[].[Timestamp,HistorySummary]" --output table
+```
+
+- **The invoke:** writes a demo alert that Notify refuses on purpose. Lambda retries it 3 times, then sends
+  the batch to the DLQ.
+- **`get-queue-attributes`:** expected `1` after the retries.
+- **`describe-alarms`:** `ALARM` within about 5 minutes, and an email from SNS.
+- **`purge-queue`:** empties the DLQ, so the alarm goes back to `OK` and a real failure can email again.
+- **`describe-alarm-history`:** shows `OK → ALARM` and `ALARM → OK` with their times. On 2026-11-14 the alarm
+  went to ALARM 5 min 14 s after the invoke and back to OK 3 min 22 s after the purge.
+- The demo item stays in the feed with `notified: false` until its 30-day expiry.
+
+**7.3 The other alarms.** Four more alarms email through the same topic: API 5xx, ask errors (Quick + Deep),
+worker errors and scan errors. To see one email without breaking anything, force its state; it returns to OK
+at its next evaluation:
+
+```powershell
+$apiAlarm = aws cloudformation describe-stack-resource --stack-name research-desk --logical-resource-id ApiErrorsAlarm --region $region --query StackResourceDetail.PhysicalResourceId --output text
+aws cloudwatch set-alarm-state --alarm-name $apiAlarm --state-value ALARM --state-reason "demo" --region $region
+```
+
+Like the replays, this changes state on AWS: it sends one alarm email (the alarms don't email on OK).
+
+**7.4 The web UI.** The same features in a browser: https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/
+(access code once per session). Quick and Deep answers with sources and the Deep trace, the watchlist with
+live quotes, and the alert feed. See the README's "Web UI".
+
+---
+
+## 8. Local
 
 | What | Command | Notes |
 |---|---|---|
@@ -293,7 +376,7 @@ a Deep result for reading, add `| Out-File -Encoding utf8 "$env:TEMP\deep.json"`
 
 ---
 
-## 8. Feature checklist
+## 9. Feature checklist
 
 | Feature | Step |
 |---|---|
@@ -304,7 +387,7 @@ a Deep result for reading, add `| Out-File -Encoding utf8 "$env:TEMP\deep.json"`
 | Watchlist in DynamoDB (list, add by company name, remove, 404) | B1, B7, B8, B9 |
 | Batched quotes with `source` and `trading_date` | B2, B3 |
 | News headlines | B5 |
-| Alert feed route (empty until I3) | B6 |
+| Alert feed (Watchdog alerts, newest first) | B6, 7.1 |
 | Async jobs: 202 + `job_id`, then poll until `done` | every Ask + Poll job |
 | Quick keyword routing to market / news / filings | Q1, Q2, Q3 |
 | Filings search as the default when no keyword matches | Q4 |
@@ -322,10 +405,14 @@ a Deep result for reading, add `| Out-File -Encoding utf8 "$env:TEMP\deep.json"`
 | Job item with 24 h TTL | 6.3 |
 | Deep daily cap (50 per Pacific day) | 6.4 |
 | CloudWatch EMF metrics | 6.5 |
-| Unit tests, newman, CLI | 7 |
+| Watchdog: replay alert with a "why", Telegram via the DynamoDB Stream, dedupe | 7.1 |
+| Failed delivery → DLQ → alarm email → purge → OK; refused during the session | 7.2 |
+| Error alarms (API 5xx, ask, worker, scan) through SNS | 7.3 |
+| Web UI on Streamlit Community Cloud | 7.4 |
+| Unit tests, newman, CLI | 8 |
 
 **Not in this demo:**
-- The Watchdog (price alerts to Telegram, the dead-letter queue and its alarm): I3.
-- The UI and the API error alarm: I4.
+- A question about a company without indexed filings (e.g. Apple): the answer's `notice` says its filings
+  aren't covered (I5). Smoke-tested on AWS (PROGRESS, I5); ask it in the UI to show it.
 - The Deep → Quick fallback: it needs a Gemini outage, the 75 s budget to run out, or the daily cap to be
   reached. Unit tests cover it.
