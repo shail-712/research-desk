@@ -2,6 +2,17 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I5 — Docs, diagram, demo (branch `iter-5`; 2026-11-15)
+- No AWS changes and no Gemini calls in I5.
+- **Review I4 finding 1 (tests not hermetic): fixed.**
+  - `tests/unit/test_ui.py` has an autouse fixture that runs each test from `tmp_path`, points `~` there
+    too, and starts from a fresh `st.secrets`. A local `.streamlit/secrets.toml` can no longer leak in.
+  - `python -m pytest` from the repo root, with the real secrets file present: **431 passed** (it was
+    430 + 1 failed).
+- **Review I4 findings 2–4:** in `docs/DESIGN.md` (known limitations and production improvements). No code
+  change.
+- **Review I4 finding 5:** the Scan Init Duration note is corrected in the I4 section.
+
 ## I4 — I3 review fixes, error alarms, Streamlit UI (branch `iter-4`; deployed 2026-11-13, tests 2026-11-14)
 - **Code (commit `1bfa31b`, committed by you):**
   - **(1)** `aws_lambda/scan.py` refuses `fail_delivery` during the New York session.
@@ -56,8 +67,11 @@ Written by the Builder. One row per task; newest phase first.
   |---|---|---|
   | API | 3 | 2325 ms |
   | Worker | 3 | 3850 ms |
-  | Scan | 2 | 3675 ms |
+  | Scan | 2 | 3675 ms* |
   | Notify | 2 (the token at v2) | 2431 ms |
+
+  \* Scan's cold start was the 19:15:17 UTC scheduled run (`fb6af761`, "Already alerted"), not the dry run
+  (corrected in I5, review I4 finding 5).
 - **newman, demo collection: PASS.** 46 requests (26 steps + 20 polls), **120/120 assertions**, 0 failed,
   1 min 3 s. The worker log since the deploy shows 9 answers, all `done`, using **18 Gemini calls**: 1 from the
   secret check, Quick 5 × 1, Deep 3 + 6 + 3.
@@ -107,10 +121,11 @@ Written by the Builder. One row per task; newest phase first.
   - Not changed in I4 (outside review I3's findings): API and Worker still have SAM's `DynamoDBCrudPolicy`
     (including Scan, DeleteItem and the batch actions, plus `index/*`). They could be narrowed the same way
     later.
-- **Not done yet:**
-  - The UI on Streamlit Community Cloud (yours: README "Web UI").
-  - Reviewer (I4), then merge to `main`.
-  - Review I3 finding 5 (`docs/example_demo.md`) is left for I5.
+- **Streamlit Community Cloud: PASS (you, after the merge; recorded in I5).** The UI is live at
+  https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/. You tested the gate, Quick, Deep, the watchlist
+  and the feed, and all work. That was the last open I4 check.
+- Reviewer (I4): APPROVED (`docs/reviews/I4.md`), merged to `main` (`f3eab8d`). Review I3 finding 5
+  (`docs/example_demo.md`) was left for I5.
 
 ## I3 — Watchdog on AWS (branch `iter-3`; 2026-11-13)
 - **Telegram (local):** `core.telegram.send(...)` with the `.env` token and chat ID → `sent: True`, 1 attempt, 2.05 s
