@@ -72,7 +72,8 @@ flowchart LR
   worker --> yahoo
   worker --> finnhub
   worker --> sec
-  api -->|"quotes, news, name lookup"| yahoo
+  api -->|"quotes, news"| yahoo
+  api -->|"name to ticker: company_tickers.json"| sec
   sched --> scan
   scan -->|"quotes"| yahoo
   scan -->|"why: headlines + 1 call"| gemini
@@ -114,7 +115,7 @@ code with no LLM judge ([full results](docs/eval/v2-results.md)).
 | Latency p50 / p90 (client-side, includes polling) | 6.5 s / 10.4 s | 13.2 s / 20.3 s |
 | Gemini calls per question (mean) | 1.0 | 4.7 |
 
-- **Cold starts:** worker init 2.2–4.3 s and API init 1.4–2.5 s across deploys; the first start of a newly
+- **Cold starts:** worker init 2.6–4.3 s and API init 1.4–2.5 s across deploys; the first start of a newly
   pushed image once hit Lambda's 10 s init limit ([DESIGN](docs/DESIGN.md#known-limitations)).
 - **Cost:** about $0/month is a design target, not a measured bill. It rests on the free tiers (Gemini,
   Lambda, API Gateway), a provisioned 2/2 DynamoDB table and no always-on servers. A $1 AWS Budget emails
@@ -206,7 +207,7 @@ From the command line, run the same collection with newman:
 
 `postman/Research-Desk-Demo.postman_collection.json` is the full walk-through: auth and validation errors,
 market data, the watchlist, the alert feed, Quick routing and Deep mode, each step with its checks
-(about 22 Gemini calls). [`docs/example_demo.md`](docs/example_demo.md) explains every step and what proves it.
+(about 22 Gemini calls estimated; 18 in the I4 run). [`docs/example_demo.md`](docs/example_demo.md) explains every step and what proves it.
 
 ## Web UI (Streamlit)
 

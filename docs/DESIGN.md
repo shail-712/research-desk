@@ -34,7 +34,7 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
   - Simple questions (one intent, one company) take a fast path with one specialist.
 - **Why:** in investment research, a number without a source is a liability. The board makes every claim
   traceable, and the code check catches numbers the model invented.
-- **Result (deployed eval, 2026-11-11, 20 questions):** 1 of 141 numbers in Deep answers couldn't be traced
+- **Result (deployed eval, answers from 2026-11-09 and 11-11, 20 questions):** 1 of 141 numbers in Deep answers couldn't be traced
   to evidence.
 - **Trade-off:** cost and time. Deep is a mean of 4.7 Gemini calls and 13.2 s p50, against Quick's 1.0
   calls and 6.5 s. Quick stays the default for simple questions (D5).
@@ -84,8 +84,12 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
     could get NVIDIA's or AMD's filings, and the answer could cite the wrong company. **Fixed in I5:** a named
     company with no indexed filings gets no filings, and both modes say so in the answer's notice: "SEC filings
     for Apple Inc. (AAPL) aren't covered: the filings index has AMD, INTC and NVDA only."
-  - What's left: a Deep filings search with no ticker still searches all documents. The planner usually passes
-    the ticker, but nothing enforces it.
+  - What's left:
+    - A Deep filings search with no ticker still searches all documents. The planner usually passes the
+      ticker, but nothing enforces it.
+    - In Quick, when no company is recognised in the question, the search covers all documents with no
+      notice. That's by design for questions like "Which chipmaker…", but an Apple question that doesn't
+      name a company the resolver knows (e.g. "the iPhone maker") can still get NVIDIA, AMD or Intel filings.
 - **News is per company only.** Each headline comes from that ticker's Yahoo RSS feed, and there's no general
   market news. If no headline names the company, the feed's top stories are used instead.
 - **Deep mode can miss the latest period's figures.**
@@ -99,7 +103,7 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
     no headlines.
   - Routing by keyword costs no LLM call, which is why it's used (D5).
 - **Cold starts and the Gemini free tier.**
-  - The image is 1.27 GB. Worker init is ~2.2–4.3 s, and once, on the first start of a new image, it hit
+  - The image is 1.27 GB. Worker init is 2.6–4.3 s, and once, on the first start of a new image, it hit
     Lambda's 10 s init limit.
   - Free-tier models return 503/504 under load. Falling back costs time: one Quick job took 39.1 s.
   - The daily quota caps the number of Deep questions. When it runs out, a Deep answer falls back to Quick

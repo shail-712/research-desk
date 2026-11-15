@@ -5,7 +5,7 @@ message and status code below is taken from `aws_lambda/api.py`, `aws_lambda/ask
 `core/agent.py` and `core/agents/deep.py` (written on branch `iter-3`, 2026-11-12; Watchdog section and
 expected results updated on `iter-5`, 2026-11-15, image `8bd7e7f6aa84`).
 
-**Cost of one run:** about **22 Gemini calls** (Quick 5 × 1, Deep about 3 + 10 + 4), 3 of the 50 daily Deep
+**Cost of one run:** about **22 Gemini calls**, an estimate (Quick 5 × 1, Deep about 3 + 10 + 4; the I4 run used 18), 3 of the 50 daily Deep
 slots, and about 4 minutes. It writes only 8 job items (they expire after 24 h), the Deep daily counter, and
 AAPL, which is added and then removed from the watchlist. Run the demo once, with Postman **or** newman, not both.
 The Watchdog part (7) adds 1 Gemini call and 1 Telegram message per replay.

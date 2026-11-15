@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Research Desk API - Demo",
-    "description": "One-run demo of every deployed feature (docs/example_demo.md). Uses the same Postman environment as Research-Desk.postman_collection.json: base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE, type secret). Run it top to bottom with the Collection Runner or newman: each Ask saves its job_id and jumps to 'Poll job', which polls every 3 s until the job is done, checks that step's trace fields, then jumps to the next Ask. About 22 Gemini calls in total.",
+    "description": "One-run demo of every deployed feature (docs/example_demo.md). Uses the same Postman environment as Research-Desk.postman_collection.json: base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE, type secret). Run it top to bottom with the Collection Runner or newman: each Ask saves its job_id and jumps to 'Poll job', which polls every 3 s until the job is done, checks that step's trace fields, then jumps to the next Ask. About 22 Gemini calls in total (an estimate; the I4 run used 18).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [

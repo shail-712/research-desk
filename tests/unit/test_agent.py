@@ -49,7 +49,8 @@ def tools():
     with mock.patch.object(agent.tickers, "find_companies", return_value=[NVDA]) as find, \
          mock.patch.object(agent.market, "get_quote", return_value=QUOTE) as quote, \
          mock.patch.object(agent.news, "get_news", return_value=[ARTICLE]) as news, \
-         mock.patch.object(agent.retriever, "search", return_value=[CHUNK]) as search,          mock.patch.object(agent.retriever, "indexed_tickers", return_value=frozenset({"NVDA", "AMD", "INTC"})), \
+         mock.patch.object(agent.retriever, "search", return_value=[CHUNK]) as search, \
+         mock.patch.object(agent.retriever, "indexed_tickers", return_value=frozenset({"NVDA", "AMD", "INTC"})), \
          mock.patch.object(agent.llm, "generate", return_value="NVDA is $200 [Doc 1]") as gen:
         yield {"find": find, "quote": quote, "news": news, "search": search, "generate": gen}
 

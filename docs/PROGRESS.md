@@ -56,8 +56,33 @@ Written by the Builder. One row per task; newest phase first.
   - **`docs/DEMO-SCRIPT.md` (new):** the interview run sheet. Checks before the interview, part 1 (15 min) by
     topic, part 2 (20 min) step by step with measured timings and what to do when a step fails, and likely
     Q&A questions with pointers into the docs.
-  - DESIGN: worker init range now 2.2–4.3 s (the I5 deploy's 4.3 s). ITERATIONS: the diagram is Mermaid in
-    the README.
+  - DESIGN: worker init range now 2.6–4.3 s, the recorded inits (2.6–2.9 s in I1, up to 4.3 s in I5).
+    ITERATIONS: the diagram is Mermaid in the README.
+- **Review I5 (`docs/reviews/I5.md`, APPROVED, no MUST): findings 1–7 fixed, docs and one test-formatting
+  change, no AWS calls.**
+  1. DEMO-SCRIPT uses only recorded AWS numbers: the brief's query 17.6 s / 10 calls (checker 25/25) and
+     15.8 s / 13 calls (checker 9/9); the AMD Quick question ~7 s warm, ~10 s cold. The call budget is marked
+     as an estimate.
+  2. Worker init 2.6–4.3 s in README, DESIGN and DEMO-SCRIPT (2.2 s wasn't recorded).
+  3. README diagram: the API's name lookup goes to SEC's `company_tickers.json`, not Yahoo.
+  4. DESIGN: Quick's gap added next to Deep's: with no company recognised, Quick searches all documents
+     with no notice.
+  5. DESIGN: the deployed eval's answers are from 2026-11-09 and 11-11.
+  6. `tests/unit/test_agent.py`: the two merged `with` items are on their own lines again.
+  7. "About 22 Gemini calls" is marked as an estimate (the I4 run used 18) in the README, example_demo and the
+     demo collection.
+  - Finding 8 (build before commit) is a process note: next deploy, commit first, then `sam build`.
+- **Fresh-clone check: not completed.**
+  - In the scratch folder, the clone of `iter-5`, `py -3.12 -m venv .venv` and `.env.example` → `.env`
+    worked.
+  - `pip install -r requirements-dev.txt` failed with `OSError: [Errno 2]`, twice. moto's deepest file
+    (`…\site-packages\moto\stepfunctions\parser\asl\component\state\exec\state_map\item_reader\eval\resource_output_transformer\transformer_factory.py`)
+    went over Windows' 260-character path limit. The scratch path is long (141 characters to
+    `site-packages`), and this machine has `LongPathsEnabled = 0`. Mapping a short drive letter with `subst`
+    didn't help, because venv resolves it back to the real path.
+  - Not a README error. That file's full path was 273 characters in the scratch folder, and it's 184 in the
+    usual checkout (`C:\Shail\Projects\research-desk`), which is why the main `.venv` works. To be re-run from
+    a short path.
 - **Review I4 finding 1 (tests not hermetic): fixed.**
   - `tests/unit/test_ui.py` has an autouse fixture that runs each test from `tmp_path`, points `~` there
     too, and starts from a fresh `st.secrets`. A local `.streamlit/secrets.toml` can no longer leak in.

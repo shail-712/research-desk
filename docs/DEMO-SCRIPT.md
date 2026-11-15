@@ -1,11 +1,12 @@
 # Demo script: 15 min explanation + 20 min demo + 15 min Q&A
 
 The run sheet for the interview. The step-by-step reference for every feature, with the commands and what
-proves each one, is [`example_demo.md`](example_demo.md). Timings and call counts below are measured on AWS
-(PROGRESS, the deployed eval).
+proves each one, is [`example_demo.md`](example_demo.md). Timings and call counts below are recorded on AWS
+(PROGRESS, the deployed eval) unless marked local or estimate.
 
-**Gemini budget for one run:** about 25 calls (Deep brief query 10–16, Quick 1, Deep comparison about 5,
-replay 1, Apple Quick 1, plus Q1 in Postman 1), and 2 of the 50 daily Deep slots. Rehearse on a different day from the interview, or
+**Gemini budget for one run (estimate):** about 20 calls: the Deep brief query 10 or 13 (its two AWS runs),
+the Deep comparison about 5 (Deep's mean is 4.7), 1 each for the AMD Quick, the replay, the Apple Quick, Q1 in
+Postman and the warm-up question. It also uses 2 of the 50 daily Deep slots. Rehearse on a different day from the interview, or
 keep rehearsals to the Quick steps, so the free-tier quota is full on the day.
 
 ---
@@ -34,8 +35,8 @@ keep rehearsals to the Quick steps, so the free-tier quota is full on the day.
 - [ ] Open the UI (https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/). If Community Cloud shows that
       the app is asleep, wake it now; that takes about a minute.
 - [ ] Enter the access code and ask one Quick question ("What is NVIDIA's stock price?"). This warms both
-      Lambdas, so the demo doesn't start with a cold start (worker init 2–4 s, and the first start of a new
-      image has once taken 10 s).
+      Lambdas, so the demo doesn't start with a cold start (worker init 2.6–4.3 s, and the first start of a
+      new image once hit Lambda's 10 s init limit).
 - [ ] Tabs in order: README (architecture diagram), the UI, Postman (the demo collection, environment
       selected), Telegram on your phone or desktop, CloudWatch Logs for the worker, DESIGN.md.
 
@@ -58,8 +59,8 @@ keep rehearsals to the Quick steps, so the free-tier quota is full on the day.
 | Min | Where | Do | Expect (measured) | If it goes wrong |
 |---|---|---|---|---|
 | 0–2 | UI | Show the gate, the watchlist with live quotes, the alert feed. | Quotes with their source (`yfinance` or `finnhub`) and session date; feed newest first. | Quotes show `error`: Yahoo blocked, and Finnhub is the fallback; say so. |
-| 2–5 | UI, Quick | "What is AMD's market cap and P/E ratio, and the latest headlines?" | 6–13 s, 1 Gemini call. Sources: a market quote and headlines, each cited `[Doc N]`. | — |
-| 5–10 | UI, Deep | The brief's query: "Analyze NVIDIA's Q3 earnings report. Compare revenue growth with AMD and Intel. Provide any information on top companies that are using NVIDIA GPUs (and revenue from them), competitive threats to NVIDIA. Summarize recent news sentiment and provide a risk assessment based on current market conditions." While it runs, explain the planner. | 15–30 s, 10–16 calls. The trace shows the plan (market, news, filings), each specialist's steps and time, and the checker (e.g. 14/14 numbers supported). The answer says Q3 FY2027 isn't filed yet and uses Q2 FY2027, with the 16% customer concentration. | A Gemini 503 adds time (the next model answers). Over 75 s you get a partial answer with a notice. If Deep fails, it falls back to Quick and says so: show the notice, it's a designed path. |
+| 2–5 | UI, Quick | "What is AMD's market cap and P/E ratio, and the latest headlines?" | ~7 s warm, ~10 s cold, 1 Gemini call. Sources: a market quote and headlines, each cited `[Doc N]`. | — |
+| 5–10 | UI, Deep | The brief's query: "Analyze NVIDIA's Q3 earnings report. Compare revenue growth with AMD and Intel. Provide any information on top companies that are using NVIDIA GPUs (and revenue from them), competitive threats to NVIDIA. Summarize recent news sentiment and provide a risk assessment based on current market conditions." While it runs, explain the planner. | On AWS: 17.6 s with 10 calls (checker 25/25 numbers supported) and 15.8 s with 13 calls (checker 9/9). The trace shows the plan (market, news, filings), each specialist's steps and time, and the checker result. The answer says Q3 FY2027 isn't filed yet and uses Q2 FY2027, with the 16% customer concentration. | A Gemini 503 adds time (the next model answers). Over 75 s you get a partial answer with a notice. If Deep fails, it falls back to Quick and says so: show the notice, it's a designed path. |
 | 10–13 | UI, Deep | "Compare NVIDIA's and AMD's data center segment revenue" | ~11 s in the deployed eval (Deep averages 4.7 calls). Both companies' segment figures, each cited `E#`. | — |
 | 13–16 | PowerShell + Telegram + UI | Replay with the ticker you picked (`example_demo.md` 7.1, change `INTC` if needed). | Telegram within seconds: "📉 <TICKER> -7.5% on … (replay)", its "why", and "Demo replay: this move did not happen." Then the UI feed shows it first, `notified: true`. Run it again: 0 events, "Already alerted" (dedupe). | No Telegram message: check the feed's `notified`; if it's `false`, the DLQ and alarm path takes over (DESIGN). |
 | 16–18 | Postman, CloudWatch | **A2** (no code → 401), then **Q1** + Poll job (202, then `done`). Copy `x-request-id` and find it in the API and worker logs (`example_demo.md` 6.1). | One request ID in both Lambdas' logs, from `POST /ask -> 202` to "Ask job … done". | Logs take a few seconds to appear. |
