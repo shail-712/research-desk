@@ -2,6 +2,96 @@
 
 Written by the Builder. One row per task; newest phase first.
 
+## I5 — Docs, diagram, demo (branch `iter-5`; 2026-11-15)
+- AWS: one image rebuild and change set for the coverage fix below (2026-11-15, Sunday, market closed).
+  Gemini: 6 calls, for the smoke tests.
+- **Bug fix: an uncovered company got other companies' filings (commit `87ba76d`).**
+  - **Before:** when the named company had no indexed filings, filings search fell back to all documents.
+    So an Apple question could get NVIDIA's, AMD's or Intel's filings, and the answer could cite them.
+  - **Now:**
+    - A named company with no indexed filings gets no filings, and no embedding call is made. Several named
+      companies: only the indexed ones are searched.
+    - A one-company search ranks all of that company's rows (934 in the index), not just the global top
+      50. The old fallback was hiding misses there.
+    - Quick and Deep answers carry a fixed `notice`: "SEC filings for Apple Inc. (AAPL) aren't covered: the
+      filings index has AMD, INTC and NVDA only." Quick's prompt and Deep's filings tool also tell the model.
+      A Deep fallback to Quick keeps the notice.
+  - `python -m pytest`: **442 passed** (431 + 11 new; the old fallback test is replaced by the bug's
+    regression test).
+- **Deploy:**
+  - Rollback prepared: the live template (image `cba3f96a644c`) was saved, and that image stays in ECR
+    (keep-2 drops the I2 image `f92da023`).
+  - `sam build`; `sam deploy --no-execute-changeset`. New image `8bd7e7f6aa84`, `EnableWatchdog=true`,
+    AlertEmail re-passed from the stack.
+  - The built image's `core/`, `aws_lambda/` and `jobs/` match commit `87ba76d`, except one code comment fixed
+    after the build (the index row count).
+  - **Change set: 7 rows, all Modify, 0 Add, 0 Remove, 0 Replace.**
+    - The 4 functions' `Code`.
+    - `HttpApi` (Body), the Scan schedule (Target) and its role (Policies), marked "Dynamic" because they
+      reference the function ARNs. The template is unchanged.
+  - Executed 09:13:35 → 09:14:38 UTC, `UPDATE_COMPLETE`. All 4 functions are on `8bd7e7f6aa84`.
+  - Secrets: API loaded `APP_ACCESS_CODE, FINNHUB_API_KEY, SEC_USER_AGENT` (init 2542 ms). The worker loaded
+    `FINNHUB_API_KEY, GEMINI_API_KEY, SEC_USER_AGENT` (init 4288 ms). No errors. Scan and Notify hadn't run
+    yet on a Sunday.
+- **Smoke tests on AWS: PASS.**
+
+  | Question | Mode | Time | Gemini calls | Result |
+  |---|---|---|---|---|
+  | "What risks does Apple highlight in its SEC filings?" | Quick | 8 s | 1 | Notice shown, 0 sources. The answer says Apple's filings aren't covered. |
+  | the same | Deep | 12 s | 4 | Notice shown. The answer says Apple's risk disclosures aren't in the index. Its 3 sources are Apple's own filing dates from SEC (`latest_filing`), no other company's filings. |
+  | "What risks does NVIDIA highlight in its SEC filings?" | Quick | 4 s | 1 | No notice. 5 NVIDIA Risk Factors excerpts (10-Q and 10-K), cited. |
+
+  Request IDs: `G3-1vjHUSwMEKYg=`, `G3-3Og9ZywMEJfg=`, `G3-5SgrFSwMEJkg=`.
+- **Docs for submission (2026-11-15):**
+  - **README:** a Mermaid architecture diagram (every AWS component of the live 29-resource stack, the data
+    flows and the external services), a Results section (deployed eval, cold starts, cost as a design
+    target), the live UI link, the demo collection, the Watchdog's SSM secrets, how to add a company, and the
+    docs list. The live stack's resource count was read from CloudFormation (29, with 5 alarms).
+    The diagram's rendering wasn't checked with mermaid-cli (that download was blocked here); check it in
+    a Markdown preview or on GitHub.
+  - **`docs/example_demo.md` (review I3 finding 5):** B6 expects Watchdog alerts, as the demo collection's
+    B6 test does since `5ec9fd3`. New part 7: replay → Telegram → feed, the failure path → DLQ → alarm →
+    purge → OK (refused during the session), forcing an alarm's state, and the UI. The checklist and cold-start
+    numbers are updated to the I5 image.
+  - **`docs/DEMO-SCRIPT.md` (new):** the interview run sheet. Checks before the interview, part 1 (15 min) by
+    topic, part 2 (20 min) step by step with measured timings and what to do when a step fails, and likely
+    Q&A questions with pointers into the docs.
+  - DESIGN: worker init range now 2.6–4.3 s, the recorded inits (2.6–2.9 s in I1, up to 4.3 s in I5).
+    ITERATIONS: the diagram is Mermaid in the README.
+- **Review I5 (`docs/reviews/I5.md`, APPROVED, no MUST): findings 1–7 fixed, docs and one test-formatting
+  change, no AWS calls.**
+  1. DEMO-SCRIPT uses only recorded AWS numbers: the brief's query 17.6 s / 10 calls (checker 25/25) and
+     15.8 s / 13 calls (checker 9/9); the AMD Quick question ~7 s warm, ~10 s cold. The call budget is marked
+     as an estimate.
+  2. Worker init 2.6–4.3 s in README, DESIGN and DEMO-SCRIPT (2.2 s wasn't recorded).
+  3. README diagram: the API's name lookup goes to SEC's `company_tickers.json`, not Yahoo.
+  4. DESIGN: Quick's gap added next to Deep's: with no company recognised, Quick searches all documents
+     with no notice.
+  5. DESIGN: the deployed eval's answers are from 2026-11-09 and 11-11.
+  6. `tests/unit/test_agent.py`: the two merged `with` items are on their own lines again.
+  7. "About 22 Gemini calls" is marked as an estimate (the I4 run used 18) in the README, example_demo and the
+     demo collection.
+  - Finding 8 (build before commit) is a process note: next deploy, commit first, then `sam build`.
+- **Fresh-clone check: not completed.**
+  - In the scratch folder, the clone of `iter-5`, `py -3.12 -m venv .venv` and `.env.example` → `.env`
+    worked.
+  - `pip install -r requirements-dev.txt` failed with `OSError: [Errno 2]`, twice. moto's deepest file
+    (`…\site-packages\moto\stepfunctions\parser\asl\component\state\exec\state_map\item_reader\eval\resource_output_transformer\transformer_factory.py`)
+    went over Windows' 260-character path limit. The scratch path is long (141 characters to
+    `site-packages`), and this machine has `LongPathsEnabled = 0`. Mapping a short drive letter with `subst`
+    didn't help, because venv resolves it back to the real path.
+  - Not a README error. That file's full path was 273 characters in the scratch folder, and it's 184 in the
+    usual checkout (`C:\Shail\Projects\research-desk`), which is why the main `.venv` works. To be re-run from
+    a short path.
+- **Review I4 finding 1 (tests not hermetic): fixed.**
+  - `tests/unit/test_ui.py` has an autouse fixture that runs each test from `tmp_path`, points `~` there
+    too, and starts from a fresh `st.secrets`. A local `.streamlit/secrets.toml` can no longer leak in.
+  - `python -m pytest` from the repo root, with the real secrets file present: **431 passed** (it was
+    430 + 1 failed).
+- **Review I4 findings 2–4:** in `docs/DESIGN.md` (known limitations and production improvements). No code
+  change.
+- **Review I4 finding 5:** the Scan Init Duration note is corrected in the I4 section.
+
 ## I4 — I3 review fixes, error alarms, Streamlit UI (branch `iter-4`; deployed 2026-11-13, tests 2026-11-14)
 - **Code (commit `1bfa31b`, committed by you):**
   - **(1)** `aws_lambda/scan.py` refuses `fail_delivery` during the New York session.
@@ -56,8 +146,11 @@ Written by the Builder. One row per task; newest phase first.
   |---|---|---|
   | API | 3 | 2325 ms |
   | Worker | 3 | 3850 ms |
-  | Scan | 2 | 3675 ms |
+  | Scan | 2 | 3675 ms* |
   | Notify | 2 (the token at v2) | 2431 ms |
+
+  \* Scan's cold start was the 19:15:17 UTC scheduled run (`fb6af761`, "Already alerted"), not the dry run
+  (corrected in I5, review I4 finding 5).
 - **newman, demo collection: PASS.** 46 requests (26 steps + 20 polls), **120/120 assertions**, 0 failed,
   1 min 3 s. The worker log since the deploy shows 9 answers, all `done`, using **18 Gemini calls**: 1 from the
   secret check, Quick 5 × 1, Deep 3 + 6 + 3.
@@ -107,10 +200,11 @@ Written by the Builder. One row per task; newest phase first.
   - Not changed in I4 (outside review I3's findings): API and Worker still have SAM's `DynamoDBCrudPolicy`
     (including Scan, DeleteItem and the batch actions, plus `index/*`). They could be narrowed the same way
     later.
-- **Not done yet:**
-  - The UI on Streamlit Community Cloud (yours: README "Web UI").
-  - Reviewer (I4), then merge to `main`.
-  - Review I3 finding 5 (`docs/example_demo.md`) is left for I5.
+- **Streamlit Community Cloud: PASS (you, after the merge; recorded in I5).** The UI is live at
+  https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/. You tested the gate, Quick, Deep, the watchlist
+  and the feed, and all work. That was the last open I4 check.
+- Reviewer (I4): APPROVED (`docs/reviews/I4.md`), merged to `main` (`f3eab8d`). Review I3 finding 5
+  (`docs/example_demo.md`) was left for I5.
 
 ## I3 — Watchdog on AWS (branch `iter-3`; 2026-11-13)
 - **Telegram (local):** `core.telegram.send(...)` with the `.env` token and chat ID → `sent: True`, 1 attempt, 2.05 s

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Research Desk API - Demo",
-    "description": "One-run demo of every deployed feature (docs/example_demo.md). Uses the same Postman environment as Research-Desk.postman_collection.json: base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE, type secret). Run it top to bottom with the Collection Runner or newman: each Ask saves its job_id and jumps to 'Poll job', which polls every 3 s until the job is done, checks that step's trace fields, then jumps to the next Ask. About 22 Gemini calls in total.",
+    "description": "One-run demo of every deployed feature (docs/example_demo.md). Uses the same Postman environment as Research-Desk.postman_collection.json: base_url (the stack's ApiUrl output) and access_code (APP_ACCESS_CODE, type secret). Run it top to bottom with the Collection Runner or newman: each Ask saves its job_id and jumps to 'Poll job', which polls every 3 s until the job is done, checks that step's trace fields, then jumps to the next Ask. About 22 Gemini calls in total (an estimate; the I4 run used 18).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -538,7 +538,7 @@
       ]
     },
     {
-      "name": "B6 Alert feed (empty until I3)",
+      "name": "B6 Alert feed (Watchdog alerts, newest first)",
       "request": {
         "method": "GET",
         "header": [
@@ -570,7 +570,11 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
-              "pm.test(\"events is a list\", () => pm.expect(pm.response.json().events).to.be.an(\"array\"));"
+              "const events = pm.response.json().events;",
+              "events.forEach(e => console.log(e.created_at, \"|\", e.title, \"| notified:\", e.notified));",
+              "pm.test(\"at least 1 alert (alerts are kept 30 days; if empty, run a replay, docs/example_demo.md 5b)\", () => { pm.expect(events).to.be.an(\"array\"); pm.expect(events.length).to.be.within(1, 5); });",
+              "pm.test(\"each alert has ticker, kind, title, created_at, notified\", () => events.forEach(e => pm.expect(e).to.include.all.keys(\"ticker\", \"kind\", \"title\", \"created_at\", \"notified\")));",
+              "pm.test(\"newest first\", () => pm.expect(events.map(e => e.created_at)).to.eql(events.map(e => e.created_at).sort().reverse()));"
             ]
           }
         }

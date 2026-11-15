@@ -77,10 +77,47 @@ def test_ticker_preference_filters_results(small_index):
     assert {c["company"] for c in chunks} == {"AMD"}
 
 
-def test_ticker_without_documents_falls_back_to_all(small_index):
+def test_company_without_filings_gets_nothing_not_other_companies(small_index):
+    """I5 bug fix: an Apple question used to get NVIDIA/AMD filings (fallback to all documents)."""
+    with _embedder(_query(0)) as get_service:
+        assert retriever.search("apple revenue", ticker="AAPL") == []
+        assert retriever.search("apple revenue", tickers=["AAPL", "MSFT"]) == []
+    get_service.assert_not_called()  # no embedding call when nothing can match
+
+
+def test_several_companies_keep_only_the_indexed_ones(small_index):
+    with _embedder(_query(0, 1)):
+        chunks = retriever.search("compare apple and amd", tickers=["AAPL", "AMD"])
+    assert chunks and {c["ticker"] for c in chunks} == {"AMD"}
+
+
+def test_ticker_search_is_not_limited_to_the_global_top_k(small_index, monkeypatch):
+    """Without the fallback, a covered company whose chunks rank below the global top k must still be found."""
+    monkeypatch.setattr(retriever, "OVERFETCH_K", 2)  # the global top 2 are both NVIDIA
     with _embedder(_query(0)):
-        chunks = retriever.search("apple", ticker="AAPL")
-    assert chunks and {c["ticker"] for c in chunks} <= {"NVDA", "AMD"}
+        assert {c["ticker"] for c in retriever.search("nvidia", top_k=2)} == {"NVDA"}
+        chunks = retriever.search("nvidia", ticker="AMD", top_k=2)
+    assert [c["ticker"] for c in chunks] == ["AMD", "AMD"]
+
+
+def test_not_covered_names_missing_companies(small_index):
+    from core.tickers import Company
+
+    apple, amd = Company("AAPL", "Apple Inc.", 320193), Company("AMD", "AMD", 2488)
+    assert retriever.indexed_tickers() == {"NVDA", "AMD"}
+    assert retriever.not_covered([apple, amd]) == [apple]
+    assert retriever.not_covered_message([amd]) is None
+    assert retriever.not_covered_message([apple, amd]) == (
+        "SEC filings for Apple Inc. (AAPL) aren't covered: the filings index has AMD and NVDA only.")
+    assert retriever.not_covered_message([Company("ZZZZ", "ZZZZ")]).startswith("SEC filings for ZZZZ aren't")
+
+
+def test_not_covered_claims_nothing_when_the_index_is_unreadable(tmp_path, monkeypatch):
+    from core.tickers import Company
+
+    monkeypatch.setattr(vectors, "_index", vectors.LocalIndex(tmp_path))
+    assert retriever.indexed_tickers() is None
+    assert retriever.not_covered_message([Company("AAPL", "Apple Inc.")]) is None
 
 
 def test_single_company_results_are_not_capped(small_index):

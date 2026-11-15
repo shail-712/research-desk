@@ -7,17 +7,119 @@ its source: a live quote, a news headline, or a passage from an SEC filing.
 
 It has two modes:
 
-- **Quick:** picks the tools the question needs, runs them in parallel, and
-  makes one Gemini call. On AWS: median 5.8 s from request to answer over 5
-  eval questions; a warm market + news question took ~6.6 s (4.0 s of work).
-  A cold start took ~10 s (3.8 s of worker start-up). Median 3.0 s locally.
-  See [the eval](docs/eval/v2-results.md).
-- **Deep:** a supervisor sends the question to three specialists (market,
-  news, filings) in parallel. They post evidence to a shared board, and a
+- **Quick:** picks the tools the question needs with keyword rules, runs them in
+  parallel, and makes one Gemini call.
+- **Deep:** a Gemini supervisor sends the question to specialists (market,
+  news, filings) that run in parallel. They post evidence to a shared board, and a
   fact-checker checks every number in the final answer against that evidence.
+  Simple questions take a fast path with one specialist.
 
-It runs on AWS (Lambda, API Gateway, DynamoDB, S3) and is built to cost
-about $0/month: Gemini free tier, a small DynamoDB table, no always-on servers.
+A **Watchdog** scans the watchlist every 15 minutes during the New York
+session and sends a Telegram alert, with a one-line "why", when a stock moves
+3% or more.
+
+It runs on AWS (Lambda, API Gateway, DynamoDB, S3, EventBridge Scheduler, SQS,
+SNS) and is built to cost about $0/month: Gemini free tier, a small
+provisioned DynamoDB table, no always-on servers.
+
+**Try it:** the web UI is at https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/
+(access code given with the submission), or use the Postman collections in
+`postman/`. The design write-up is [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph clients["Clients"]
+    ui["Streamlit UI<br/>Community Cloud"]
+    pm["Postman / newman"]
+  end
+
+  subgraph aws["AWS ap-southeast-2: SAM stack research-desk"]
+    apigw["API Gateway HTTP API<br/>throttle: burst 10, 5 req/s"]
+    api["ApiFunction<br/>auth, routes, jobs"]
+    worker["AskWorkerFunction<br/>Quick and Deep agents"]
+    ddb[("DynamoDB table<br/>jobs, watchlist, alert feed, state")]
+    s3[("S3 bucket<br/>FAISS index: 934 filing chunks")]
+    ssm["SSM Parameter Store<br/>secrets, SecureString"]
+    sched["EventBridge Scheduler<br/>every 15 min, Mon-Fri, New York time"]
+    scan["ScanFunction<br/>price moves of 3% or more"]
+    notify["NotifyFunction"]
+    dlq["SQS dead-letter queue"]
+    cw["CloudWatch<br/>logs, EMF metrics, 5 alarms"]
+    sns["SNS alarm topic"]
+    budget["AWS Budget, $1/month"]
+  end
+
+  subgraph ext["External services"]
+    gemini["Google Gemini API<br/>answers, embeddings"]
+    yahoo["Yahoo Finance<br/>quotes, RSS news"]
+    finnhub["Finnhub<br/>quote fallback"]
+    sec["SEC EDGAR<br/>tickers, latest filings"]
+    tg["Telegram Bot API"]
+  end
+
+  email["Email"]
+
+  ui -->|"HTTPS + x-access-code"| apigw
+  pm -->|"HTTPS + x-access-code"| apigw
+  apigw --> api
+  api -->|"1. pending job"| ddb
+  api -->|"2. async invoke"| worker
+  worker -->|"3. answer, sources, trace"| ddb
+  worker -->|"index, cached in memory"| s3
+  worker --> gemini
+  worker --> yahoo
+  worker --> finnhub
+  worker --> sec
+  api -->|"quotes, news"| yahoo
+  api -->|"name to ticker: company_tickers.json"| sec
+  sched --> scan
+  scan -->|"quotes"| yahoo
+  scan -->|"why: headlines + 1 call"| gemini
+  scan -->|"alert + dedupe, one transaction"| ddb
+  ddb -->|"Stream: new alerts only"| notify
+  notify --> tg
+  notify -->|"mark notified"| ddb
+  notify -->|"after 3 failed retries"| dlq
+  dlq -->|"messages visible"| cw
+  cw -->|"on ALARM"| sns
+  sns --> email
+  budget --> email
+  api -.->|"own secrets at cold start"| ssm
+  worker -.-> ssm
+  scan -.-> ssm
+  notify -.-> ssm
+```
+
+- **Ask path:** the API Lambda answers in milliseconds with `202` and a `job_id`; the worker does the slow
+  work and the client polls `GET /ask/{job_id}`. Finnhub is also the fallback for the API's and the scan's
+  quotes (edges left out for clarity).
+- **Watchdog path:** the scan only writes alerts. Delivery is a separate function fed by the DynamoDB
+  Stream, so a Telegram outage can't slow or fail the scan. Failed deliveries go to the dead-letter queue,
+  and its alarm emails.
+- **Operations:** all 4 functions run from one container image in ECR (its own stack, `research-desk-ecr`).
+  Each reads only its own secrets from SSM. Every function logs JSON with one request ID per request.
+  Five alarms email through SNS: failed alerts, API 5xx, ask errors, worker errors and scan errors.
+
+## Results
+
+From the deployed eval: 20 questions × 2 modes on AWS, 40/40 answered, 2026-11-09 and 11-11, scored by
+code with no LLM judge ([full results](docs/eval/v2-results.md)).
+
+| | Quick | Deep |
+|---|---|---|
+| Numbers not traceable to the evidence | 2 of 161 (1%) | 1 of 141 (1%) |
+| Lines with numbers that carry a citation | 91% | 82% |
+| Right companies found | 100% | 100% |
+| Latency p50 / p90 (client-side, includes polling) | 6.5 s / 10.4 s | 13.2 s / 20.3 s |
+| Gemini calls per question (mean) | 1.0 | 4.7 |
+
+- **Cold starts:** worker init 2.6–4.3 s and API init 1.4–2.5 s across deploys; the first start of a newly
+  pushed image once hit Lambda's 10 s init limit ([DESIGN](docs/DESIGN.md#known-limitations)).
+- **Cost:** about $0/month is a design target, not a measured bill. It rests on the free tiers (Gemini,
+  Lambda, API Gateway), a provisioned 2/2 DynamoDB table and no always-on servers. A $1 AWS Budget emails
+  if that's wrong.
 
 ## How a Quick question works
 
@@ -103,9 +205,14 @@ The Postman collection in `postman/` covers every route. To use it:
 From the command line, run the same collection with newman:
 `npx newman run postman/Research-Desk.postman_collection.json --env-var base_url=... --env-var access_code=...`
 
+`postman/Research-Desk-Demo.postman_collection.json` is the full walk-through: auth and validation errors,
+market data, the watchlist, the alert feed, Quick routing and Deep mode, each step with its checks
+(about 22 Gemini calls estimated; 18 in the I4 run). [`docs/example_demo.md`](docs/example_demo.md) explains every step and what proves it.
+
 ## Web UI (Streamlit)
 
-`ui/app.py` is a client of the deployed API only. It lets you ask in Quick or Deep mode and shows the
+Live at https://research-desk-pnivvnmyzvtsqizfwgbxuz.streamlit.app/. `ui/app.py` is a client of the
+deployed API only. It lets you ask in Quick or Deep mode and shows the
 answer with its sources and trace. It also shows the watchlist with live quotes and the alert feed. It
 reads two Streamlit secrets, `API_URL` (the stack's `ApiUrl` output) and `ACCESS_CODE`, and viewers must
 type the same access code once per session.
@@ -158,9 +265,14 @@ curl.exe $url/health        # {"ok": true}
 ```
 
 With `EnableWatchdog=false` the stack has 14 resources and no price-alert
-path. `EnableWatchdog=true` adds the scan and notify functions, the Scheduler,
-the DynamoDB Stream, the DLQ and its alarm. Confirm the SNS subscription email
-that AWS sends to `AlertEmail`.
+path. `EnableWatchdog=true` (the live stack) adds the scan and notify functions,
+the Scheduler, the DynamoDB Stream mapping, the DLQ and the alarms: 29 resources.
+Confirm the SNS subscription email that AWS sends to `AlertEmail`. The Watchdog
+also needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in SSM.
+
+To cover another company's filings: `python cli.py ingest <TICKERS>`, then
+`python -m scripts.bootstrap --replace` (swaps the S3 index, only if it is still
+the version it read), then add the ticker to the watchlist.
 
 ### Teardown
 
@@ -198,9 +310,19 @@ aws ssm delete-parameters --region $region --names /research-desk/GEMINI_API_KEY
 
 ## Docs
 
+- [`docs/DESIGN.md`](docs/DESIGN.md): design choices, known limitations,
+  production improvements (the brief's 1–2 page document)
+- [`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md): the interview run sheet
+  (15 + 20 + 15 min)
+- [`docs/example_demo.md`](docs/example_demo.md): every deployed feature,
+  step by step, with what proves it
+- [`docs/eval/v2-results.md`](docs/eval/v2-results.md): the eval, local and
+  deployed
 - [`docs/SPEC.md`](docs/SPEC.md): features, architecture, API, agents
 - [`docs/DECISIONS.md`](docs/DECISIONS.md): trade-offs, including why Gemini
   instead of Bedrock
+- [`docs/PROGRESS.md`](docs/PROGRESS.md): build log, every deploy and
+  measurement
 - [`docs/ITERATIONS.md`](docs/ITERATIONS.md): delivery plan (I0–I5)
 - [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md): the original brief
 - [`AGENT.md`](AGENT.md): Builder and Reviewer prompts
@@ -220,7 +342,7 @@ aws ssm delete-parameters --region $region --names /research-desk/GEMINI_API_KEY
 | `scripts/` | `bootstrap.py`: SSM secrets, create-only index upload, watchlist seed | I1, I3 |
 | `infra/` | `ecr.yaml`: the ECR repository stack, deployed before `sam deploy` (D15) | I1 |
 | `template.yaml`, `samconfig.toml`, `Dockerfile` | SAM stack and the Lambda image (Region in `samconfig.toml`, D17) | I1–I4 |
-| `postman/` | Postman collection for every API route (run with `newman`) | I1–I3 |
+| `postman/` | Postman collections: every API route, and the demo walk-through (run with `newman`) | I1–I5 |
 | `evals/` | 20-question eval set, runner and frozen scorer | I2, I4 |
 | `tests/` | Unit tests (fully mocked; `python -m pytest`) | all |
 | `.github/` | CI: pytest on every push | all |

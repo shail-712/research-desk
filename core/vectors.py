@@ -70,6 +70,7 @@ class IndexData:
         if len(self.vectors):
             self.index.add(self.vectors)
         self.hashes = {m.get("chunk_hash") for m in meta}
+        self.tickers = frozenset(m["ticker"] for m in meta if m.get("ticker"))
 
     @classmethod
     def empty(cls, model: str, dim: int) -> "IndexData":
@@ -90,11 +91,15 @@ class IndexData:
             raise VectorIndexError("Document index does not match the embedding model")
         if not self.meta:
             return []
-        distances, ids = self.index.search(vec.reshape(1, -1), min(k, len(self.meta)))
+        if ticker and ticker not in self.tickers:
+            return []
+        # With a ticker, rank every row before filtering: that company's best chunks may not be in the
+        # global top k. The index is small (934 rows in I5), so a full flat search is cheap.
+        distances, ids = self.index.search(vec.reshape(1, -1), len(self.meta) if ticker else min(k, len(self.meta)))
         # IndexFlatL2 returns squared L2; for unit vectors cosine = 1 - d²/2.
         out = [(self.meta[i], 1 - float(d) / 2) for d, i in zip(distances[0], ids[0]) if 0 <= i < len(self.meta)]
         if ticker:
-            out = [(m, s) for m, s in out if m.get("ticker") == ticker]
+            out = [(m, s) for m, s in out if m.get("ticker") == ticker][:k]
         return [_candidate(m, s) for m, s in out]
 
     def with_rows(self, rows: list[dict], vectors: np.ndarray) -> "IndexData":
@@ -165,6 +170,10 @@ class LocalIndex:
 
     def search(self, vec, k=OVERFETCH_K, ticker=None):
         return self.load().search(vec, k, ticker)
+
+    def tickers(self) -> frozenset[str]:
+        """Companies with at least one indexed chunk."""
+        return self.load().tickers
 
     def existing_hashes(self) -> set[str]:
         return set(self.load(create=True).hashes)
@@ -260,6 +269,10 @@ class S3Index:
 
     def search(self, vec, k=OVERFETCH_K, ticker=None):
         return self.load().search(vec, k, ticker)
+
+    def tickers(self) -> frozenset[str]:
+        """Companies with at least one indexed chunk."""
+        return self.load().tickers
 
     def upload(self, npz: bytes, replace_etag: str | None = None) -> str:
         """Create-only upload (If-None-Match: *). With `replace_etag`, replaces exactly that version

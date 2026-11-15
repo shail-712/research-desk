@@ -147,6 +147,10 @@ def _search_filings(board: EvidenceBoard, agent: str, query: str, ticker: str | 
         summary = f"[{label}] {c['text'].strip()[:1200]}"
         ev = board.add(agent, "search_filings", summary, label, c.get("url"), "document")
         out.append({"id": ev.id, "text": summary})
+    if not out and ticker:
+        missing = retriever.not_covered_message([_company(ticker)])
+        if missing:  # no fallback to other companies' filings (I5)
+            return {"evidence": [], "note": f"{missing} Report this as a gap; don't use other companies' filings."}
     return {"evidence": out} if out else {"evidence": [], "note": "no matching passages"}
 
 

@@ -112,6 +112,18 @@ def fake_api(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _no_local_secrets(tmp_path, monkeypatch):
+    """Hide any real secrets.toml: Streamlit reads ./.streamlit and ~/.streamlit, so point both at an empty
+    folder and start from a fresh, unparsed st.secrets."""
+    import streamlit as st
+    from streamlit.runtime.secrets import Secrets
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(st, "secrets", Secrets())
+
+
 def _app(secrets: dict):
     from streamlit.testing.v1 import AppTest
 

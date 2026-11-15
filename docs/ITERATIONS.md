@@ -103,7 +103,7 @@ The plan from 2026-11-07 on (D16). Older plans are in `docs/archive/` and should
 
 | Task | Kind |
 |---|---|
-| Architecture diagram image (`docs/architecture.png`), matching what is actually deployed. | docs |
+| Architecture diagram, matching what is actually deployed: Mermaid in the README's "Architecture" (was `docs/architecture.png`; changed in I5 so it renders on GitHub and stays in text). | docs |
 | `docs/DESIGN.md`, 1–2 pages: design choices (D1–D17), challenges, and production improvements, including everything cut in D13. | docs |
 | Final README: the diagram, setup, deploy, Postman and Streamlit links, eval summary and cost. | docs |
 | Resume numbers, measured ones only (latency, cold start, eval scores, cost). | docs |

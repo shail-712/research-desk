@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from core import agent as quick_agent
-from core import llm, tickers
+from core import llm, retriever, tickers
 from core.agents import checker, supervisor
 from core.agents.evidence import EvidenceBoard
 from core.agents.specialists import Report, incomplete_gap, run_specialist
@@ -63,8 +63,8 @@ def _take_daily_slot() -> bool:
 def _quick(question: str, reason: str, trace: dict) -> dict:
     result = quick_agent.answer(question)
     trace["fallback"] = reason
-    result.update(mode="quick-fallback", trace=trace,
-                  notice=f"Deep mode wasn't available ({reason}), so this is a Quick answer.")
+    notices = [f"Deep mode wasn't available ({reason}), so this is a Quick answer.", result.get("notice")]
+    result.update(mode="quick-fallback", trace=trace, notice=" ".join(n for n in notices if n))
     return result
 
 
@@ -162,9 +162,13 @@ def answer_deep(question: str) -> dict:
     logger.info("Deep answer: %.1fs, %d LLM calls, %d evidence, checker %s/%s supported",
                 total, llm.calls_made() - calls_before, len(board), verdict.supported, verdict.numbers_checked,
                 extra={"mode": "deep", "seconds": total, "partial": bool(cut_short)})
-    notice = (f"Partial answer: the {DEEP_BUDGET_SECONDS:.0f} s time budget ran out before the "
-              f"{', '.join(cut_short)} specialist(s) finished, so this uses the evidence gathered so far."
-              if cut_short else None)
+    notices = [f"Partial answer: the {DEEP_BUDGET_SECONDS:.0f} s time budget ran out before the "
+               f"{', '.join(cut_short)} specialist(s) finished, so this uses the evidence gathered so far."
+               if cut_short else None]
+    if any(r["agent"] == "filings" for r in reports):  # I5: say when a company's filings aren't indexed
+        notices.append(retriever.not_covered_message(
+            [tickers.lookup_ticker(t) or tickers.Company(t, t) for t in plan["companies"]]))
+    notice = " ".join(n for n in notices if n) or None
     return {
         "notice": notice,
         "answer": verdict.answer,
