@@ -3,7 +3,45 @@
 Written by the Builder. One row per task; newest phase first.
 
 ## I5 — Docs, diagram, demo (branch `iter-5`; 2026-11-15)
-- No AWS changes and no Gemini calls in I5.
+- AWS: one image rebuild and change set for the coverage fix below (2026-11-15, Sunday, market closed).
+  Gemini: 6 calls, for the smoke tests.
+- **Bug fix: an uncovered company got other companies' filings (commit `87ba76d`).**
+  - **Before:** when the named company had no indexed filings, filings search fell back to all documents.
+    So an Apple question could get NVIDIA's, AMD's or Intel's filings, and the answer could cite them.
+  - **Now:**
+    - A named company with no indexed filings gets no filings, and no embedding call is made. Several named
+      companies: only the indexed ones are searched.
+    - A one-company search ranks all of that company's rows (934 in the index), not just the global top
+      50. The old fallback was hiding misses there.
+    - Quick and Deep answers carry a fixed `notice`: "SEC filings for Apple Inc. (AAPL) aren't covered: the
+      filings index has AMD, INTC and NVDA only." Quick's prompt and Deep's filings tool also tell the model.
+      A Deep fallback to Quick keeps the notice.
+  - `python -m pytest`: **442 passed** (431 + 11 new; the old fallback test is replaced by the bug's
+    regression test).
+- **Deploy:**
+  - Rollback prepared: the live template (image `cba3f96a644c`) was saved, and that image stays in ECR
+    (keep-2 drops the I2 image `f92da023`).
+  - `sam build`; `sam deploy --no-execute-changeset`. New image `8bd7e7f6aa84`, `EnableWatchdog=true`,
+    AlertEmail re-passed from the stack.
+  - The built image's `core/`, `aws_lambda/` and `jobs/` match commit `87ba76d`, except one code comment fixed
+    after the build (the index row count).
+  - **Change set: 7 rows, all Modify, 0 Add, 0 Remove, 0 Replace.**
+    - The 4 functions' `Code`.
+    - `HttpApi` (Body), the Scan schedule (Target) and its role (Policies), marked "Dynamic" because they
+      reference the function ARNs. The template is unchanged.
+  - Executed 09:13:35 → 09:14:38 UTC, `UPDATE_COMPLETE`. All 4 functions are on `8bd7e7f6aa84`.
+  - Secrets: API loaded `APP_ACCESS_CODE, FINNHUB_API_KEY, SEC_USER_AGENT` (init 2542 ms). The worker loaded
+    `FINNHUB_API_KEY, GEMINI_API_KEY, SEC_USER_AGENT` (init 4288 ms). No errors. Scan and Notify hadn't run
+    yet on a Sunday.
+- **Smoke tests on AWS: PASS.**
+
+  | Question | Mode | Time | Gemini calls | Result |
+  |---|---|---|---|---|
+  | "What risks does Apple highlight in its SEC filings?" | Quick | 8 s | 1 | Notice shown, 0 sources. The answer says Apple's filings aren't covered. |
+  | the same | Deep | 12 s | 4 | Notice shown. The answer says Apple's risk disclosures aren't in the index. Its 3 sources are Apple's own filing dates from SEC (`latest_filing`), no other company's filings. |
+  | "What risks does NVIDIA highlight in its SEC filings?" | Quick | 4 s | 1 | No notice. 5 NVIDIA Risk Factors excerpts (10-Q and 10-K), cited. |
+
+  Request IDs: `G3-1vjHUSwMEKYg=`, `G3-3Og9ZywMEJfg=`, `G3-5SgrFSwMEJkg=`.
 - **Review I4 finding 1 (tests not hermetic): fixed.**
   - `tests/unit/test_ui.py` has an autouse fixture that runs each test from `tmp_path`, points `~` there
     too, and starts from a fresh `st.secrets`. A local `.streamlit/secrets.toml` can no longer leak in.
