@@ -415,3 +415,58 @@ def test_filings_prompt_reports_the_latest_period_and_keeps_partial_evidence():
     for name, text in texts.items():
         for word in ("NVIDIA", "NVDA", "AMD", "Intel", "INTC", "Q3", "FY2027"):
             assert word not in text, f"{word!r} in the {name}"
+
+
+# ─── companies without indexed filings (I5) ────────────────────────────────
+
+APPLE_MESSAGE = "SEC filings for Apple Inc. (AAPL) aren't covered: the filings index has AMD, INTC and NVDA only."
+
+
+@pytest.fixture
+def three_companies_indexed():
+    with mock.patch.object(tools.retriever, "indexed_tickers", return_value=frozenset({"NVDA", "AMD", "INTC"})):
+        yield
+
+
+@pytest.fixture
+def apple():
+    from core.tickers import Company
+
+    company = Company("AAPL", "Apple Inc.", 320193)
+    with mock.patch.object(deep.tickers, "find_companies", return_value=[company]), \
+         mock.patch.object(deep.tickers, "lookup_ticker", return_value=company), \
+         mock.patch.object(tools.tickers, "lookup_ticker", return_value=company):
+        yield company
+
+
+def test_search_filings_for_a_company_without_filings_says_not_covered(three_companies_indexed, apple):
+    b = EvidenceBoard()
+    with mock.patch.object(tools.retriever, "search", return_value=[]) as search:
+        out = tools.run_tool("search_filings", {"query": "risk factors", "ticker": "aapl"}, b, "filings")
+    assert search.call_args.kwargs["ticker"] == "AAPL"
+    assert out["evidence"] == [] and out["note"].startswith(APPLE_MESSAGE)
+    assert "don't use other companies' filings" in out["note"] and len(b) == 0
+
+
+def test_search_filings_for_a_covered_company_with_no_hits_is_unchanged(three_companies_indexed):
+    with mock.patch.object(tools.retriever, "search", return_value=[]):
+        out = tools.run_tool("search_filings", {"query": "x", "ticker": "NVDA"}, EvidenceBoard(), "filings")
+    assert out == {"evidence": [], "note": "no matching passages"}
+
+
+def test_deep_answer_about_an_uncovered_company_has_the_notice(no_checker_llm, three_companies_indexed, apple):
+    with mock.patch.object(deep, "run_specialist", side_effect=_report()), \
+         mock.patch.object(deep.supervisor, "write", return_value="Apple's filings aren't covered [E1]."):
+        result = deep.answer_deep("What risks does Apple highlight in its filings?")
+    assert result["mode"] == "deep" and result["used_tools"] == ["filings"]
+    assert result["notice"] == APPLE_MESSAGE
+
+
+def test_quick_fallback_keeps_the_coverage_notice(three_companies_indexed, apple):
+    quick = {"answer": "q", "mode": "quick", "notice": APPLE_MESSAGE}
+    with mock.patch.object(deep, "run_specialist", side_effect=_report(add_evidence=False)), \
+         mock.patch.object(deep.quick_agent, "answer", return_value=quick):
+        result = deep.answer_deep("What risks does Apple highlight in its filings?")
+    assert result["mode"] == "quick-fallback"
+    assert result["notice"].startswith("Deep mode wasn't available (the specialists found no evidence)")
+    assert result["notice"].endswith(APPLE_MESSAGE)

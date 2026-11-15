@@ -49,7 +49,7 @@ def tools():
     with mock.patch.object(agent.tickers, "find_companies", return_value=[NVDA]) as find, \
          mock.patch.object(agent.market, "get_quote", return_value=QUOTE) as quote, \
          mock.patch.object(agent.news, "get_news", return_value=[ARTICLE]) as news, \
-         mock.patch.object(agent.retriever, "search", return_value=[CHUNK]) as search, \
+         mock.patch.object(agent.retriever, "search", return_value=[CHUNK]) as search,          mock.patch.object(agent.retriever, "indexed_tickers", return_value=frozenset({"NVDA", "AMD", "INTC"})), \
          mock.patch.object(agent.llm, "generate", return_value="NVDA is $200 [Doc 1]") as gen:
         yield {"find": find, "quote": quote, "news": news, "search": search, "generate": gen}
 
@@ -83,14 +83,43 @@ def test_answer_fetches_every_company_for_comparisons(tools):
     result = agent.answer("Compare NVIDIA and AMD stock price")
     tickers_quoted = sorted(c.args[0] for c in tools["quote"].call_args_list)
     assert tickers_quoted == ["AMD", "NVDA"]
-    # two companies -> no single-company preference for the document search
-    assert tools["search"].call_args.kwargs["ticker"] is None
+    # two companies -> the document search covers both, and only them
+    assert tools["search"].call_args.kwargs["tickers"] == ["NVDA", "AMD"]
     assert result["used_tools"] == ["market", "rag"]
 
 
-def test_answer_prefers_the_one_company_in_document_search(tools):
-    agent.answer("What are NVIDIA's revenue trends?")
-    assert tools["search"].call_args.kwargs["ticker"] == "NVDA"
+def test_answer_searches_only_the_named_company(tools):
+    result = agent.answer("What are NVIDIA's revenue trends?")
+    assert tools["search"].call_args.kwargs["tickers"] == ["NVDA"]
+    assert result["notice"] is None and "FILING COVERAGE" not in result["context"]
+
+
+def test_no_company_named_searches_all_documents(tools):
+    tools["find"].return_value = []
+    agent.answer("Which chipmaker has the most customer concentration risk?")
+    assert tools["search"].call_args.kwargs["tickers"] is None
+
+
+def test_company_without_filings_is_told_not_covered(tools):
+    """I5: a question about a company with no indexed filings says so (model + notice), with no
+    other company's filings as a stand-in."""
+    apple = Company("AAPL", "Apple Inc.", 320193)
+    tools["find"].return_value = [apple]
+    tools["search"].return_value = []  # the retriever returns nothing for AAPL
+    result = agent.answer("What risks does Apple highlight in its filings?")
+    assert tools["search"].call_args.kwargs["tickers"] == ["AAPL"]
+    message = "SEC filings for Apple Inc. (AAPL) aren't covered: the filings index has AMD, INTC and NVDA only."
+    assert result["notice"] == message
+    prompt = tools["generate"].call_args.args[0]
+    assert "FILING COVERAGE\n" + message in prompt and "say so plainly" in prompt
+    assert result["sources"] == []
+
+
+def test_mixed_question_names_only_the_missing_company(tools):
+    tools["find"].return_value = [Company("AAPL", "Apple Inc.", 320193), NVDA]
+    result = agent.answer("Compare Apple and NVIDIA revenue")
+    assert result["notice"].startswith("SEC filings for Apple Inc. (AAPL) aren't covered")
+    assert "NVIDIA" not in result["notice"].split(":")[0]
 
 
 def test_tool_failure_is_reported_in_context_not_raised(tools):

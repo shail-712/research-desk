@@ -107,6 +107,8 @@ CONTEXT (live market data, recent headlines and excerpts from SEC filings; each 
 
 Instructions:
 - Answer strictly from the context. If it is not enough, say what is missing.
+- If FILING COVERAGE says a company's filings aren't covered, say so plainly. Never use another
+  company's filings to answer for it.
 - Use concrete numbers and say how current they are (quote session, filing period and date).
 - Cite every number and every claim with its label, e.g. "Revenue was $46.7 billion [Doc 3]".
   A line that contains a number must carry a [Doc N] citation.
@@ -126,8 +128,9 @@ def _timed(fn, *args, **kwargs):
 
 
 def _rag_search(query: str, companies: list[tickers.Company]) -> list[dict]:
-    """Prefers that company's documents when the question is about exactly one company."""
-    return retriever.search(query, ticker=companies[0].ticker if len(companies) == 1 else None)
+    """Only the named companies' documents (none if none of them is indexed); all documents when no
+    company is named."""
+    return retriever.search(query, tickers=[c.ticker for c in companies] or None)
 
 
 def answer(query: str) -> dict:
@@ -173,6 +176,8 @@ def answer(query: str) -> dict:
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 
+    # Named companies with no indexed filings: told to the model and shown as a notice (I5).
+    coverage_note = retriever.not_covered_message(companies) if "rag" in tools else None
     sections, sources, used_tools, timings = [], [], [], {}
     by_ticker = {c.ticker: c for c in companies}
     n = 0
@@ -206,6 +211,8 @@ def answer(query: str) -> dict:
                      for a in value]
             sections.append("NEWS\n" + "\n".join(lines))
         elif tool == "rag":
+            if coverage_note:
+                sections.append(f"FILING COVERAGE\n{coverage_note}")
             if not value:
                 sections.append("FILING EXCERPTS\nNo matching documents.")
                 continue
@@ -222,6 +229,7 @@ def answer(query: str) -> dict:
         "companies": [c.to_dict() for c in companies], "sources": sources,
         "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"), "timings": timings,
         "mode": "quick",
+        "notice": coverage_note,
         "context": context,  # the evidence the answer was written from (used by the eval)
     }
 

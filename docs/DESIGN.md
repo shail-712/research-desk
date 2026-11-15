@@ -77,6 +77,17 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
 - The scope was cut for speed (D13). The cut items are listed under production improvements.
 
 ## Known limitations
+- **SEC filings cover 3 companies: NVDA, AMD and INTC.**
+  - Quotes (Yahoo, with Finnhub as the fallback) and headlines (Yahoo RSS) work for any listed ticker, so a
+    question about another company still gets a price and news, but no filings.
+  - Until I5, filings search fell back to all documents when the named company had none. An Apple question
+    could get NVIDIA's or AMD's filings, and the answer could cite the wrong company. **Fixed in I5:** a named
+    company with no indexed filings gets no filings, and both modes say so in the answer's notice: "SEC filings
+    for Apple Inc. (AAPL) aren't covered: the filings index has AMD, INTC and NVDA only."
+  - What's left: a Deep filings search with no ticker still searches all documents. The planner usually passes
+    the ticker, but nothing enforces it.
+- **News is per company only.** Each headline comes from that ticker's Yahoo RSS feed, and there's no general
+  market news. If no headline names the company, the feed's top stories are used instead.
 - **Deep mode can miss the latest period's figures.**
   - When the asked period isn't filed yet (e.g. "NVIDIA's Q3" before NVIDIA files it), the answer reliably
     says so, and names the latest filed period.
@@ -119,6 +130,13 @@ The build history and every measurement are in [PROGRESS.md](PROGRESS.md).
   latest filed one, search for "latest results". This replaces relying on the prompt.
 - **Routing:** when a company is named but no intent word matches, run all three tools. Or route with a
   small classifier call.
+- **Coverage and news:**
+  - General market news and company news from Finnhub. Today Finnhub is used only as the quote fallback and
+    for the optional market cap and P/E.
+  - Adding a company is a documented step, not a code change: `python cli.py ingest <TICKERS>`, then
+    `python -m scripts.bootstrap --replace` to swap the S3 index (it replaces exactly the version it read),
+    then add the ticker to the watchlist.
+  - Make a Deep filings search with no ticker use the plan's companies.
 - **Latency:**
   - Lazier imports (pandas and yfinance only when a quote is needed), a smaller image, and a warm-up call
     after each deploy.
