@@ -72,7 +72,18 @@ Written by the Builder. One row per task; newest phase first.
   7. "About 22 Gemini calls" is marked as an estimate (the I4 run used 18) in the README, example_demo and the
      demo collection.
   - Finding 8 (build before commit) is a process note: next deploy, commit first, then `sam build`.
-- **Fresh-clone check: not completed.**
+- **Fresh-clone check: PASS** (`main` at `502c885`, in `C:\rd-fresh`, 2026-11-15, following the README
+  exactly).
+  - `git clone --branch main`: 113 tracked files, no `.env` and no `data/`.
+  - `py -3.12 -m venv .venv` (Python 3.12.10), then `pip install -r requirements-dev.txt`: exit 0, 327 s.
+  - `copy .env.example .env`, so no real keys.
+  - `python -m pytest`: **442 passed** in 83 s.
+  - `python cli.py market NVDA`: exit 0, a live quote from `yfinance` in 6.0 s (price, previous close, market
+    cap, P/E, `trading_date` 2026-11-13). It needs no key.
+  - The folder couldn't be deleted from here (the tool blocks removing a folder at the drive root), so it's
+    left for you to delete.
+  - README: one line added under "Run it locally": on Windows, clone to a short path or enable long paths.
+- **Fresh-clone check, first try: not completed** (kept as the reason for that README line).
   - In the scratch folder, the clone of `iter-5`, `py -3.12 -m venv .venv` and `.env.example` → `.env`
     worked.
   - `pip install -r requirements-dev.txt` failed with `OSError: [Errno 2]`, twice. moto's deepest file

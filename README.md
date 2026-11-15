@@ -155,7 +155,8 @@ limit, and the API stays fast.
 
 ## Run it locally
 
-Requires Python 3.12.
+Requires Python 3.12. On Windows, clone to a short path (e.g. `C:\rd`) or enable long paths: a dependency's
+nested files (moto's) exceed 260 characters under a long path, and `pip install` then fails.
 
 ```powershell
 py -3.12 -m venv .venv
